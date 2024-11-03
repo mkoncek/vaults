@@ -1,0 +1,20 @@
+[package]
+name = "vaults"
+version = "0.1.0"
+authors = ["Marián Konček"]
+edition = "2021"
+decription = "Specialized collections for Rust"
+license = "LGPL-3.0"
+license-file = "LICENSE"
+
+[profile.release]
+debug = true
+
+[[bin]]
+name = "bench"
+path = "src/bench.rs"
+
+[dev-dependencies]
+rand = {version = "0.8", features = ["default", "small_rng"]}
+
+[dependencies]
