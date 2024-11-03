@@ -8,4 +8,3 @@ pub type AATreeMap<KeyType, MappedType> = aa::Map<KeyType, MappedType>;
 mod repository;
 mod vector_storage;
 mod bit_indexing;
-mod trie;
