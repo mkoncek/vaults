@@ -84,23 +84,47 @@ impl<Type> Tree<Type>
 		return consumer(None);
 	}
 	
-	pub fn at(&self, position: usize) -> &Type
+	pub fn impl_get_at(&self, position: usize) -> Option<&Type>
+	{
+		self.repository.get(position).map(AsRef::as_ref)
+	}
+	
+	pub fn impl_get_at_mut(&mut self, position: usize) -> Option<&mut Type>
+	{
+		self.repository.get_mut(position).map(AsMut::as_mut)
+	}
+	
+	pub unsafe fn impl_get_at_unchecked(&self, position: usize) -> &Type
+	{
+		self.repository.get_unchecked(position).as_ref()
+	}
+	
+	pub unsafe fn impl_get_at_unchecked_mut(&mut self, position: usize) -> &mut Type
+	{
+		self.repository.get_unchecked_mut(position).as_mut()
+	}
+	
+	pub fn impl_at(&self, position: usize) -> &Type
 	{
 		self.repository[position].as_ref()
 	}
 	
-	pub fn at_mut(&mut self, position: usize) -> &mut Type
+	pub fn impl_at_mut(&mut self, position: usize) -> &mut Type
 	{
 		self.repository[position].as_mut()
 	}
 	
-	pub fn remove_at(&mut self, position: usize) -> Type
+	pub fn remove_at(&mut self, position: usize) -> Option<Type::Value>
+	where Type: node::Entry
 	{
-		let result = self.repository.remove(position).unwrap().value();
+		let Some(result) = self.repository.remove(position) else
+		{
+			return None;
+		};
 		let values = unsafe {self.repository.as_mut_slice()};
 		let parent = values[position].parent;
 		let rdes = values[position].descendants[1];
-		let new_root = node::erase_rebalance(unsafe {self.repository.as_mut_slice()}, position);
+		let new_root = node::erase_rebalance(values, position);
 		
 		if new_root != usize::MAX
 		{
@@ -128,17 +152,16 @@ impl<Type> Tree<Type>
 			self.last = parent;
 		}
 		
-		return result
+		return Some(result.value().value());
 	}
 	
-	pub(super) fn impl_retain<Function>(&mut self, mut function: Function)
-	where
-		Function: std::ops::FnMut(&mut Type) -> bool,
+	pub(super) fn impl_retain(&mut self, mut function: impl std::ops::FnMut(&mut Type) -> bool)
+	where Type: node::Entry
 	{
 		let mut it = crate::bit_indexing::TransientIndexSliceIterator::new(self.repository.index_header_leaf());
 		while let Some(i) = it.next(self.repository.index_header_leaf())
 		{
-			if ! function(self.at_mut(i))
+			if ! function(self.impl_at_mut(i))
 			{
 				self.remove_at(i);
 			}
@@ -165,7 +188,7 @@ impl<Type> Tree<Type>
 	{
 		if self.first != usize::MAX
 		{
-			Some(self.at(self.first))
+			Some(unsafe {self.impl_get_at_unchecked(self.first)})
 		}
 		else
 		{
@@ -177,7 +200,7 @@ impl<Type> Tree<Type>
 	{
 		if self.last != usize::MAX
 		{
-			Some(self.at(self.last))
+			Some(unsafe {self.impl_get_at_unchecked(self.last)})
 		}
 		else
 		{
@@ -190,7 +213,7 @@ impl<Type> Tree<Type>
 	{
 		if self.first != usize::MAX
 		{
-			Some(self.remove_at(self.first).value())
+			self.remove_at(self.first)
 		}
 		else
 		{
@@ -203,7 +226,7 @@ impl<Type> Tree<Type>
 	{
 		if self.last != usize::MAX
 		{
-			Some(self.remove_at(self.last).value())
+			self.remove_at(self.last)
 		}
 		else
 		{

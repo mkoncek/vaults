@@ -1,6 +1,5 @@
 use crate::aa;
 use crate::aa::node;
-use crate::aa::node::Entry;
 
 pub struct MapEntry<KeyType, MappedType>(KeyType, MappedType);
 
@@ -82,7 +81,7 @@ impl<KeyType, MappedType> Map<KeyType, MappedType>
 		
 		if index != usize::MAX
 		{
-			return Some(self.remove_at(index).value());
+			return self.remove_at(index);
 		}
 		
 		return None;
