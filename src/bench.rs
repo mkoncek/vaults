@@ -1,5 +1,5 @@
-use vaults::Repository;
-use vaults::AATreeSet;
+use vaults::svst::Repository;
+use vaults::svst::AATreeSet;
 
 static PRIME: usize = 18_446_744_073_709_551_557;
 

@@ -11,7 +11,7 @@ impl VectorStorage
 	{
 		Self
 		{
-			data: std::ptr::NonNull::<(crate::bit_indexing::IndexType, Type)>::dangling().cast(),
+			data: std::ptr::NonNull::<(crate::svst::bit_indexing::IndexType, Type)>::dangling().cast(),
 			capacity: 0,
 		}
 	}

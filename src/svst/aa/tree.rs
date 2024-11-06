@@ -1,4 +1,5 @@
-use crate::aa::node;
+use crate::svst::aa::node;
+use crate::svst::repository::Repository;
 
 #[derive(Debug)]
 pub struct Tree<Type>
@@ -6,7 +7,7 @@ pub struct Tree<Type>
 	pub(super) root: usize,
 	pub(super) first: usize,
 	pub(super) last: usize,
-	pub(super) repository: crate::repository::Repository<node::Node<Type>>,
+	pub(super) repository: Repository<node::Node<Type>>,
 }
 
 impl<Type> Tree<Type>
@@ -18,7 +19,7 @@ impl<Type> Tree<Type>
 			root: usize::MAX,
 			first: usize::MAX,
 			last: usize::MAX,
-			repository: crate::repository::Repository::new(),
+			repository: Repository::new(),
 		}
 	}
 	
@@ -158,7 +159,7 @@ impl<Type> Tree<Type>
 	pub(super) fn impl_retain(&mut self, mut function: impl std::ops::FnMut(&mut Type) -> bool)
 	where Type: node::Entry
 	{
-		let mut it = crate::bit_indexing::TransientIndexSliceIterator::new(self.repository.index_header_leaf());
+		let mut it = crate::svst::bit_indexing::TransientIndexSliceIterator::new(self.repository.index_header_leaf());
 		while let Some(i) = it.next(self.repository.index_header_leaf())
 		{
 			if ! function(self.impl_at_mut(i))

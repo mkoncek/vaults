@@ -1,5 +1,5 @@
-use crate::vector_storage::VectorStorage;
-use crate::bit_indexing;
+use crate::svst::vector_storage::VectorStorage;
+use crate::svst::bit_indexing;
 #[cfg(test)] use rand::seq::SliceRandom;
 
 /// A data structure holding values of type `Type`.
@@ -278,7 +278,7 @@ impl<Type> Repository<Type>
 			std::mem::align_of::<Type>(),
 			std::mem::align_of::<bit_indexing::IndexType>(),
 		);
-		let index_length = crate::bit_indexing::index_length(capacity);
+		let index_length = crate::svst::bit_indexing::index_length(capacity);
 		let byte_size = Self::array_offset(index_length) + std::mem::size_of::<Type>() * capacity;
 		
 		return (std::alloc::Layout::from_size_align(byte_size, alignment).unwrap(), index_length);

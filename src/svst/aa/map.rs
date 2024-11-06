@@ -1,5 +1,5 @@
-use crate::aa;
-use crate::aa::node;
+use crate::svst::aa;
+use crate::svst::aa::node;
 
 pub struct MapEntry<KeyType, MappedType>(KeyType, MappedType);
 
@@ -12,6 +12,19 @@ impl<KeyType, MappedType> aa::node::Entry for MapEntry<KeyType, MappedType>
 }
 
 pub type Map<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>>;
+
+/*
+pub struct VacantEntry<KeyType, MappedType>
+{
+	
+}
+
+pub enum Entry
+{
+	Vacant(),
+	Occupied(),
+}
+*/
 
 impl<KeyType, MappedType> Map<KeyType, MappedType>
 {

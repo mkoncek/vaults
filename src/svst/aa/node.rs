@@ -103,7 +103,7 @@ macro_rules! iter_impl
 					{
 						$this.bounds[1 - $index] = usize::MAX;
 					}
-					else if $crate::aa::node::get_parent_index($this.nodes, $this.bounds[$index], parent) == 1 - $index
+					else if $crate::svst::aa::node::get_parent_index($this.nodes, $this.bounds[$index], parent) == 1 - $index
 					{
 						$this.bounds[$index] = parent;
 						continue;
