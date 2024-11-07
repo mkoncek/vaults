@@ -1,5 +1,5 @@
 MAKEFLAGS += -r
-.PHONY: test test-valgrind bench
+.PHONY: test test-valgrind bench doc
 
 test:
 	cargo test --target x86_64-unknown-linux-gnu
@@ -10,3 +10,6 @@ test-valgrind: test
 
 bench:
 	cargo run --target x86_64-unknown-linux-gnu --release --bin bench
+
+doc:
+	cargo doc --target x86_64-unknown-linux-gnu

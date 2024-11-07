@@ -14,11 +14,42 @@ impl<KeyType, MappedType> aa::node::Entry for MapEntry<KeyType, MappedType>
 pub type Map<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>>;
 
 /*
-pub struct VacantEntry<KeyType, MappedType>
+#[derive(Debug)]
+pub struct VacantEntry<'t, KeyType, MappedType>
 {
 	
 }
 
+impl<'t, KeyType, MappedType> VacantEntry<'t, KeyType, MappedType>
+{
+	pub fn key(&self) -> &KeyType
+	{
+		
+	}
+	
+	pub fn into_key(self) -> KeyType
+	{
+		
+	}
+	
+	pub fn insert(self, value: MappedType) -> &'t mut MappedType
+	{
+		
+	}
+}
+
+#[derive(Debug)]
+pub struct OccupiedEntry<'t, KeyType, MappedType>
+{
+	
+}
+
+impl<'t, KeyType, MappedType> OccupiedEntry<'t, KeyType, MappedType>
+{
+	
+}
+
+#[derive(Debug)]
 pub enum Entry
 {
 	Vacant(),
@@ -106,5 +137,18 @@ impl<KeyType, MappedType> Map<KeyType, MappedType>
 		Function: std::ops::FnMut(&KeyType, &mut MappedType) -> bool,
 	{
 		self.impl_retain(move |v| function(&v.0, &mut v.1));
+	}
+}
+
+impl<Key, KeyType, MappedType> std::ops::Index<&Key> for Map<KeyType, MappedType>
+where
+	KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
+	Key: ?Sized + std::cmp::Ord,
+{
+	type Output = MappedType;
+	
+	fn index(&self, index: &Key) -> &Self::Output
+	{
+		&self.impl_get(index).expect("no entry found for key").1
 	}
 }

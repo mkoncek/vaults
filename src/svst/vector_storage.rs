@@ -20,6 +20,15 @@ impl VectorStorage
 	{
 		8 + capacity + (capacity + 1) / 2
 	}
+	
+	pub fn default_capacity_for(mut start: usize, capacity: usize) -> usize
+	{
+		while start < capacity
+		{
+			start = Self::default_capacity_growth(start);
+		}
+		return start;
+	}
 }
 
 unsafe impl Send for VectorStorage {}

@@ -50,11 +50,7 @@ impl<Type> Repository<Type>
 	{
 		if self.capacity() < self.len() + additional
 		{
-			let mut additional_exact = self.capacity();
-			while additional_exact < additional + self.capacity()
-			{
-				additional_exact = VectorStorage::default_capacity_growth(additional_exact);
-			}
+			let additional_exact = VectorStorage::default_capacity_for(self.capacity(), additional + self.capacity());
 			self.reserve_exact_unchecked(additional_exact);
 		}
 	}
@@ -96,9 +92,12 @@ impl<Type> Repository<Type>
 		let capacity = self.capacity();
 		let index = bit_indexing::push_front(self.index_header_mut(), capacity);
 		
-		unsafe {self.storage.data.as_ptr().offset(Self::array_offset(self.index_length) as isize)
-			.cast::<Type>().offset(index as isize).write(value)
-		};
+		unsafe
+		{
+			self.storage.data.as_ptr().offset(Self::array_offset(self.index_length) as isize)
+				.cast::<Type>().offset(index as isize).write(value)
+			;
+		}
 		
 		self.len += 1;
 		
@@ -126,6 +125,19 @@ impl<Type> Repository<Type>
 		}
 		
 		return result;
+	}
+	
+	/// Removes a value at _index_ from the repository, returning it.
+	/// # Time complexity
+	/// _O(log<sub>128</sub> n)_ where _n_ is the number of values in the repository.
+	pub unsafe fn remove_unchecked(&mut self, index: usize) -> Type
+	{
+		let capacity = self.capacity();
+		bit_indexing::erase(self.index_header_mut(), index, capacity);
+		self.len -= 1;
+		return self.storage.data.as_ptr().offset(Self::array_offset(self.index_length) as isize)
+			.cast::<Type>().offset(index as isize).read()
+		;
 	}
 	
 	/// Clears the repository, removing all values.
@@ -198,55 +210,13 @@ impl<Type> Repository<Type>
 	/// Returns an iterator over the values present in the repository.
 	pub fn iter(&self) -> impl std::iter::Iterator<Item = &Type>
 	{
-		struct Iterator<'t, Type>
-		{
-			it: bit_indexing::TransientIndexSliceIterator,
-			repository: &'t Repository<Type>,
-		}
-		
-		impl<'t, Type> std::iter::Iterator for Iterator<'t, Type>
-		{
-			type Item = &'t Type;
-			fn next(&mut self) -> Option<Self::Item>
-			{
-				self.it.next(self.repository.index_header_leaf()).map(move |i| &self.repository[i])
-			}
-		}
-		
-		Iterator
-		{
-			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
-			repository: self,
-		}
+		self.into_iter()
 	}
 	
 	/// Returns a mutable iterator over the values present in the repository.
 	pub fn iter_mut(&mut self) -> impl std::iter::Iterator<Item = &mut Type>
 	{
-		struct Iterator<'t, Type>
-		{
-			it: bit_indexing::TransientIndexSliceIterator,
-			repository: &'t mut Repository<Type>,
-		}
-		
-		impl<'t, Type> std::iter::Iterator for Iterator<'t, Type>
-		{
-			type Item = &'t mut Type;
-			fn next(&mut self) -> Option<Self::Item>
-			{
-				let Some(i) = self.it.next(self.repository.index_header_leaf()) else
-				{
-					return None;
-				};
-				unsafe {Some(std::ptr::addr_of_mut!(self.repository[i]).as_mut().unwrap())}
-			}
-		}
-		
-		Iterator
-		{
-			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
-			repository: self,
-		}
+		self.into_iter()
 	}
 	
 	fn simple_clear(&mut self)
@@ -375,6 +345,167 @@ impl<Type> Drop for Repository<Type>
 impl<Type> Default for Repository<Type>
 {
 	fn default() -> Self {Self::new()}
+}
+
+impl<Type> AsRef<Repository<Type>> for Repository<Type>
+{
+	fn as_ref(&self) -> &Repository<Type> {self}
+}
+
+impl<Type> AsMut<Repository<Type>> for Repository<Type>
+{
+	fn as_mut(&mut self) -> &mut Repository<Type> {self}
+}
+
+impl<Type> Clone for Repository<Type>
+where Type: Clone
+{
+	fn clone(&self) -> Self
+	{
+		let mut result = Self::new();
+		result.clone_from(self);
+		return result;
+	}
+	
+	fn clone_from(&mut self, source: &Self)
+	{
+		self.clear();
+		
+		if self.capacity() < source.capacity()
+		{
+			let mut capacity = 0;
+			let header = source.index_header_leaf();
+			
+			for i in (0 .. header.len()).rev()
+			{
+				if header[i] != 0
+				{
+					capacity = bit_indexing::IndexType::BITS as usize * i;
+					break;
+				}
+			}
+			
+			if self.capacity() < capacity
+			{
+				*self = Self::with_capacity(capacity);
+			}
+		}
+		
+		todo!()
+	}
+}
+
+impl<Type> FromIterator<Type> for Repository<Type>
+{
+	fn from_iter<T: IntoIterator<Item = Type>>(iter: T) -> Self
+	{
+		let iter = iter.into_iter();
+		let mut result = Self::with_capacity(iter.size_hint().0);
+		for v in iter
+		{
+			result.insert(v);
+		}
+		return result;
+	}
+}
+
+pub struct Iter<'t, Type>
+{
+	it: bit_indexing::TransientIndexSliceIterator,
+	repository: &'t Repository<Type>,
+}
+
+impl<'t, Type> std::iter::Iterator for Iter<'t, Type>
+{
+	type Item = &'t Type;
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		self.it.next(self.repository.index_header_leaf()).map(move |i| &self.repository[i])
+	}
+}
+
+impl<'t, Type> IntoIterator for &'t Repository<Type>
+{
+	type Item = &'t Type;
+	type IntoIter = Iter<'t, Type>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		Self::IntoIter
+		{
+			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
+			repository: self,
+		}
+	}
+}
+
+pub struct IterMut<'t, Type>
+{
+	it: bit_indexing::TransientIndexSliceIterator,
+	repository: &'t mut Repository<Type>,
+}
+
+impl<'t, Type> std::iter::Iterator for IterMut<'t, Type>
+{
+	type Item = &'t mut Type;
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		let Some(i) = self.it.next(self.repository.index_header_leaf()) else
+		{
+			return None;
+		};
+		unsafe {Some(std::ptr::addr_of_mut!(self.repository[i]).as_mut().unwrap())}
+	}
+}
+
+impl<'t, Type> IntoIterator for &'t mut Repository<Type>
+{
+	type Item = &'t mut Type;
+	type IntoIter = IterMut<'t, Type>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		Self::IntoIter
+		{
+			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
+			repository: self,
+		}
+	}
+}
+
+pub struct IterVal<Type>
+{
+	it: bit_indexing::TransientIndexSliceIterator,
+	repository: Repository<Type>,
+}
+
+impl<Type> std::iter::Iterator for IterVal<Type>
+{
+	type Item = Type;
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		let Some(i) = self.it.next(self.repository.index_header_leaf()) else
+		{
+			return None;
+		};
+		
+		unsafe {Some(self.repository.remove_unchecked(i))}
+	}
+}
+
+impl<Type> IntoIterator for Repository<Type>
+{
+	type Item = Type;
+	type IntoIter = IterVal<Type>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		Self::IntoIter
+		{
+			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
+			repository: self,
+		}
+	}
 }
 
 impl<Type> std::ops::Index<usize> for Repository<Type>

@@ -1,6 +1,6 @@
 pub type IndexType = u128;
 
-pub(super) const fn indices(index: usize) -> (usize, u128)
+pub(super) const fn indices(index: usize) -> (usize, IndexType)
 {
 	(
 		index / IndexType::BITS as usize,
@@ -156,9 +156,9 @@ fn test_index_slice_iterator()
 	assert_eq!(2, IndexSliceIterator::new(&[1, 1]).count());
 }
 
-pub fn level_length(mut size: usize) -> usize
+pub const fn level_length(mut size: usize) -> usize
 {
-	size += (IndexType::BITS - 1) as usize;
+	size += IndexType::BITS as usize - 1;
 	size /= IndexType::BITS as usize;
 	return size;
 }
@@ -177,7 +177,7 @@ fn test_level_length()
 
 pub fn index_length(mut size: usize) -> usize
 {
-	let mut result : usize = 0;
+	let mut result: usize = 0;
 	
 	loop
 	{
@@ -330,6 +330,78 @@ fn test_erase()
 	}
 }
 
+/*
+const fn max_levels() -> usize
+{
+	let mut result = 1;
+	let mut level = usize::MAX - IndexType::BITS as usize;
+	while level != 1
+	{
+		level = level_length(level);
+		result += 1;
+	}
+	return result;
+}
+*/
+
+#[derive(Debug, Clone, Copy)]
+struct Levels
+{
+	bitfield: usize,
+}
+
+impl Levels
+{
+	const WIDTH: u32 = (IndexType::BITS - 1).trailing_ones();
+}
+
+impl std::iter::Iterator for Levels
+{
+	type Item = usize;
+	
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		todo!()
+	}
+}
+
+impl From<usize> for Levels
+{
+	fn from(value: usize) -> Self
+	{
+		let mut result = Self {bitfield: value};
+		let sector = (usize::BITS - result.bitfield.leading_zeros() + Self::WIDTH - 1) / Self::WIDTH;
+		result.bitfield += (1 << ((sector.saturating_sub(2) + 1) * Self::WIDTH)) - 1;
+		return result;
+	}
+}
+
+#[test]
+fn test_levels()
+{
+	/*
+	println!("{:b}", Levels::from(0).bitfield);
+	println!("{:b}", Levels::from(1).bitfield);
+	println!("{:b}", Levels::from(2).bitfield);
+	println!("{:b}", Levels::from(3).bitfield);
+	println!("{:b}", Levels::from(4).bitfield);
+	println!("{:b}", Levels::from(127).bitfield);
+	println!("{:b}", Levels::from(128).bitfield);
+	println!("{:b}", Levels::from(129).bitfield);
+	
+	
+	assert_eq!(0, Levels::from(0).bitfield);
+	assert_eq!(IndexType::BITS as usize + 0, Levels::from(1).bitfield);
+	assert_eq!(IndexType::BITS as usize + 1, Levels::from(2).bitfield);
+	assert_eq!(IndexType::BITS as usize + IndexType::BITS as usize, Levels::from(IndexType::BITS as usize).bitfield);
+	*/
+}
+
+pub fn find_empty(index_span: &mut [IndexType], size: usize) -> usize
+{
+	todo!()
+}
+
 pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
 {
 	let mut sizes = [0_usize; 6];
@@ -426,14 +498,15 @@ fn test_push_front()
 			assert_ne!(0, arr[last_level_begin + i / IndexType::BITS as usize] & 1 << i % IndexType::BITS as usize);
 		}
 		
-		erase(&mut arr, 40_000, capacity);
+		assert!(erase(&mut arr, 40_000, capacity));
+		assert!(!erase(&mut arr, 40_000, capacity));
 		assert_eq!(40_000, push_front(&mut arr, capacity));
 		
-		erase(&mut arr, 40_000, capacity);
-		erase(&mut arr, 30_000, capacity);
-		erase(&mut arr, 20_000, capacity);
-		erase(&mut arr, 19_999, capacity);
-		erase(&mut arr, 19_998, capacity);
+		assert!(erase(&mut arr, 40_000, capacity));
+		assert!(erase(&mut arr, 30_000, capacity));
+		assert!(erase(&mut arr, 20_000, capacity));
+		assert!(erase(&mut arr, 19_999, capacity));
+		assert!(erase(&mut arr, 19_998, capacity));
 		
 		assert_eq!(19_998, push_front(&mut arr, capacity));
 		assert_eq!(19_999, push_front(&mut arr, capacity));

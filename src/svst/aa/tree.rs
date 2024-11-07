@@ -236,6 +236,11 @@ impl<Type> Tree<Type>
 	}
 }
 
+impl<Type> Default for Tree<Type>
+{
+	fn default() -> Self {Self::new()}
+}
+
 impl<Type> Tree<Type>
 {
 	fn to_dot_node(&self, index: usize, writer: &mut impl std::io::Write) -> std::io::Result<()>
