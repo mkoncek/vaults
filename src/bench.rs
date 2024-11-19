@@ -145,6 +145,8 @@ fn bench_set_clear_insert(times: usize, limit: usize)
 
 fn main()
 {
+	println!("Size of AASet (default): {} bytes", std::mem::size_of::<AATreeSet<i32>>());
+	
 	bench_insert(1_000, 1_000);
 	bench_insert(1_000, 10_000);
 	
