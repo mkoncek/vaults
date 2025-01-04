@@ -1,5 +1,6 @@
 use crate::svst::aa;
 
+#[derive(Debug)]
 pub struct SetEntry<KeyType>(KeyType);
 
 impl<KeyType> aa::node::Entry for SetEntry<KeyType>

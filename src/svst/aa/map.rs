@@ -1,6 +1,7 @@
 use crate::svst::aa;
 use crate::svst::aa::node;
 
+#[derive(Debug)]
 pub struct MapEntry<KeyType, MappedType>(KeyType, MappedType);
 
 impl<KeyType, MappedType> aa::node::Entry for MapEntry<KeyType, MappedType>
@@ -12,50 +13,6 @@ impl<KeyType, MappedType> aa::node::Entry for MapEntry<KeyType, MappedType>
 }
 
 pub type Map<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>>;
-
-/*
-#[derive(Debug)]
-pub struct VacantEntry<'t, KeyType, MappedType>
-{
-	
-}
-
-impl<'t, KeyType, MappedType> VacantEntry<'t, KeyType, MappedType>
-{
-	pub fn key(&self) -> &KeyType
-	{
-		
-	}
-	
-	pub fn into_key(self) -> KeyType
-	{
-		
-	}
-	
-	pub fn insert(self, value: MappedType) -> &'t mut MappedType
-	{
-		
-	}
-}
-
-#[derive(Debug)]
-pub struct OccupiedEntry<'t, KeyType, MappedType>
-{
-	
-}
-
-impl<'t, KeyType, MappedType> OccupiedEntry<'t, KeyType, MappedType>
-{
-	
-}
-
-#[derive(Debug)]
-pub enum Entry
-{
-	Vacant(),
-	Occupied(),
-}
-*/
 
 impl<KeyType, MappedType> Map<KeyType, MappedType>
 {
