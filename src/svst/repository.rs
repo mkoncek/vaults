@@ -66,7 +66,7 @@ impl<Type> Repository<Type>
 	
 	/// Returns a slice containing the values of the repository.
 	/// Note that the slice may contain dropped values.
-	pub(crate) unsafe fn as_slice(&self) -> &[Type]
+	pub unsafe fn as_slice(&self) -> &[Type]
 	{
 		unsafe {std::slice::from_raw_parts(self.storage.data.as_ptr()
 			.offset(Self::array_offset(self.index_length) as isize).cast::<Type>(), self.capacity()
@@ -75,7 +75,7 @@ impl<Type> Repository<Type>
 	
 	/// Returns a mutable slice containing the values of the repository.
 	/// Note that the slice may contain dropped values.
-	pub(crate) unsafe fn as_mut_slice(&mut self) -> &mut [Type]
+	pub unsafe fn as_mut_slice(&mut self) -> &mut [Type]
 	{
 		unsafe {std::slice::from_raw_parts_mut(self.storage.data.as_ptr()
 			.offset(Self::array_offset(self.index_length) as isize).cast::<Type>(), self.capacity()
