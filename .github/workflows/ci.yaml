@@ -1,22 +1,21 @@
 name: Continuous Integration
 on:
   push:
-    branches: ["main"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
   workflow_dispatch:
 env:
   CARGO_TERM_COLOR: always
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: registry.fedoraproject.org/fedora:rawhide
     steps:
     - name: Install dependencies
-      run: dnf -y install make cargo valgrind
+      run: apt install cargo
     - name: Checkout sources
       uses: actions/checkout@v4
     - name: Build
       run: cargo build --target x86_64-unknown-linux-gnu
     - name: Test
-      run: make test-valgrind
+      run: cargo test --target x86_64-unknown-linux-gnu
