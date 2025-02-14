@@ -1,6 +1,7 @@
 //! Single vector-storage collections.
 
 pub mod aa;
+pub mod svec;
 pub use repository::Repository;
 
 mod repository;
