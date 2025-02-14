@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Install dependencies
-      run: apt install cargo
+      run: sudo apt install cargo
     - name: Checkout sources
       uses: actions/checkout@v4
     - name: Build
