@@ -25,7 +25,7 @@ impl<Type, const SIZE: usize> Drop for SVec<Type, SIZE>
 			}
 			else
 			{
-				std::ptr::drop_in_place(self.variant.vector.deref_mut().as_mut_ptr());
+				std::ptr::drop_in_place(self.variant.vector.deref_mut());
 			}
 		}
 	}
@@ -33,12 +33,29 @@ impl<Type, const SIZE: usize> Drop for SVec<Type, SIZE>
 
 impl<Type, const SIZE: usize> SVec<Type, SIZE>
 {
+	pub const STATIC_CAPACITY: usize = SIZE;
+	
 	pub const fn new() -> Self
 	{
 		Self
 		{
 			size: 0,
 			variant: Variant {buffer: std::mem::ManuallyDrop::new(std::mem::MaybeUninit::uninit())},
+		}
+	}
+	
+	pub fn is_empty(&self) -> bool
+	{
+		unsafe
+		{
+			if self.size & 1 == 0
+			{
+				self.size >> 1 == 0
+			}
+			else
+			{
+				self.variant.vector.is_empty()
+			}
 		}
 	}
 	
@@ -80,16 +97,19 @@ impl<Type, const SIZE: usize> SVec<Type, SIZE>
 		{
 			if self.size & 1 == 0
 			{
-				let new_size = 1 + (self.size >> 1);
-				if new_size as usize == SIZE
+				if (self.size >> 1) as usize == SIZE
 				{
 					let array = std::ptr::read(self.variant.buffer.as_ptr());
-					let vector = Vec::from_iter(array.into_iter().map(|v| std::mem::MaybeUninit::assume_init(v)));
+					let mut vector = Vec::new();
+					vector.reserve(SIZE + 1);
+					vector.extend(array.into_iter().map(|v| std::mem::MaybeUninit::assume_init(v)));
+					vector.push(value);
 					self.variant.vector = std::mem::ManuallyDrop::new(vector);
 					self.size = 1;
 				}
 				else
 				{
+					let new_size = 1 + (self.size >> 1);
 					self.variant.buffer.deref_mut().assume_init_mut()[new_size as usize - 1].write(value);
 					self.size = new_size;
 					self.size <<= 1;
@@ -97,8 +117,91 @@ impl<Type, const SIZE: usize> SVec<Type, SIZE>
 			}
 			else
 			{
-				return self.variant.vector.deref_mut().push(value);
+				self.variant.vector.deref_mut().push(value);
 			}
 		}
 	}
+	
+	pub fn pop(&mut self) -> Option<Type>
+	{
+		unsafe
+		{
+			if self.size & 1 == 0
+			{
+				let mut size = self.size >> 1;
+				if size != 0
+				{
+					size -= 1;
+					let array = self.variant.buffer.deref_mut().assume_init_mut();
+					self.size = size;
+					self.size <<= 1;
+					Some(std::ptr::read(array.as_mut_ptr().offset(size as isize)).assume_init())
+				}
+				else
+				{
+					None
+				}
+			}
+			else
+			{
+				self.variant.vector.deref_mut().pop()
+			}
+		}
+	}
+}
+
+#[test]
+fn test_svec_push_simple()
+{
+	type TSvec = SVec::<i32, 4>;
+	let mut svec = TSvec::new();
+	assert!(svec.is_empty());
+	
+	for i in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
+	{
+		svec.push(i);
+		assert!(!svec.is_empty());
+		for j in 1 .. i + 1
+		{
+			assert_eq!(j, svec.as_slice()[j as usize - 1]);
+		}
+	}
+}
+
+#[test]
+fn test_svec_push_simple_boxed()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	assert!(svec.is_empty());
+	
+	for i in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
+	{
+		svec.push(Box::new(i));
+		assert!(!svec.is_empty());
+		for j in 1 .. i + 1
+		{
+			assert_eq!(j, *svec.as_slice()[j as usize - 1]);
+		}
+	}
+}
+
+#[test]
+fn test_svec_pop_simple()
+{
+	type TSvec = SVec::<i32, 4>;
+	let mut svec = TSvec::new();
+	
+	for i in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
+	{
+		svec.push(i);
+	}
+	
+	for i in (1 .. TSvec::STATIC_CAPACITY as i32 + 2).rev()
+	{
+		assert_eq!(Some(i), svec.pop());
+	}
+	
+	assert!(svec.is_empty());
+	assert_eq!(None, svec.pop());
 }
