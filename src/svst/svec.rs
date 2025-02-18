@@ -45,19 +45,24 @@ impl<Type, const SIZE: usize> SVec<Type, SIZE>
 		}
 	}
 	
-	pub fn is_empty(&self) -> bool
+	pub fn len(&self) -> usize
 	{
 		unsafe
 		{
 			if self.size & 1 == 0
 			{
-				self.size >> 1 == 0
+				(self.size >> 1) as usize
 			}
 			else
 			{
-				self.variant.vector.is_empty()
+				self.variant.vector.len()
 			}
 		}
+	}
+	
+	pub fn is_empty(&self) -> bool
+	{
+		self.len() == 0
 	}
 	
 	pub fn as_slice(&self) -> &[Type]
@@ -152,42 +157,6 @@ impl<Type, const SIZE: usize> SVec<Type, SIZE>
 }
 
 #[test]
-fn test_svec_push_simple()
-{
-	type TSvec = SVec::<i32, 4>;
-	let mut svec = TSvec::new();
-	assert!(svec.is_empty());
-	
-	for i in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
-	{
-		svec.push(i);
-		assert!(!svec.is_empty());
-		for j in 1 .. i + 1
-		{
-			assert_eq!(j, svec.as_slice()[j as usize - 1]);
-		}
-	}
-}
-
-#[test]
-fn test_svec_push_simple_boxed()
-{
-	type TSvec = SVec::<Box<i32>, 4>;
-	let mut svec = TSvec::new();
-	assert!(svec.is_empty());
-	
-	for i in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
-	{
-		svec.push(Box::new(i));
-		assert!(!svec.is_empty());
-		for j in 1 .. i + 1
-		{
-			assert_eq!(j, *svec.as_slice()[j as usize - 1]);
-		}
-	}
-}
-
-#[test]
 fn test_svec_drop_boxed_empty()
 {
 	type TSvec = SVec::<Box<i32>, 4>;
@@ -203,6 +172,46 @@ fn test_svec_drop_boxed_static()
 }
 
 #[test]
+fn test_svec_push_simple()
+{
+	type TSvec = SVec::<i32, 4>;
+	let mut svec = TSvec::new();
+	assert!(svec.is_empty());
+	assert_eq!(0, svec.len());
+	
+	for i in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
+	{
+		svec.push(i);
+		assert!(!svec.is_empty());
+		assert_eq!(i as usize, svec.len());
+		for j in 1 .. i + 1
+		{
+			assert_eq!(j, svec.as_slice()[j as usize - 1]);
+		}
+	}
+}
+
+#[test]
+fn test_svec_push_simple_boxed()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	assert!(svec.is_empty());
+	assert_eq!(0, svec.len());
+	
+	for i in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
+	{
+		svec.push(Box::new(i));
+		assert!(!svec.is_empty());
+		assert_eq!(i as usize, svec.len());
+		for j in 1 .. i + 1
+		{
+			assert_eq!(j, *svec.as_slice()[j as usize - 1]);
+		}
+	}
+}
+
+#[test]
 fn test_svec_pop_simple()
 {
 	type TSvec = SVec::<i32, 4>;
@@ -215,9 +224,11 @@ fn test_svec_pop_simple()
 	
 	for i in (1 .. TSvec::STATIC_CAPACITY as i32 + 2).rev()
 	{
+		assert_eq!(i as usize, svec.len());
 		assert_eq!(Some(i), svec.pop());
 	}
 	
 	assert!(svec.is_empty());
+	assert_eq!(0, svec.len());
 	assert_eq!(None, svec.pop());
 }
