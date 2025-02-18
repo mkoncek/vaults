@@ -21,7 +21,8 @@ impl<Type, const SIZE: usize> Drop for SVec<Type, SIZE>
 			if self.size & 1 == 0
 			{
 				let ptr = self.variant.buffer.deref_mut().as_mut_ptr().cast::<Type>();
-				std::slice::from_raw_parts(ptr, (self.size >> 1) as usize).iter().for_each(std::mem::drop);
+				let slice = std::slice::from_raw_parts_mut(ptr, (self.size >> 1) as usize);
+				slice.iter_mut().for_each(|v| std::ptr::drop_in_place(v));
 			}
 			else
 			{
@@ -184,6 +185,21 @@ fn test_svec_push_simple_boxed()
 			assert_eq!(j, *svec.as_slice()[j as usize - 1]);
 		}
 	}
+}
+
+#[test]
+fn test_svec_drop_boxed_empty()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let _svec = TSvec::new();
+}
+
+#[test]
+fn test_svec_drop_boxed_static()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	svec.push(Box::new(0));
 }
 
 #[test]
