@@ -32,7 +32,10 @@ impl<Type, const SIZE: usize> Drop for SVec<Type, SIZE>
 
 impl<Type, const SIZE: usize> Default for SVec<Type, SIZE>
 {
-	fn default() -> Self {Self::new()}
+	fn default() -> Self
+	{
+		Self::new()
+	}
 }
 
 impl<Type, const SIZE: usize> std::fmt::Debug for SVec<Type, SIZE>
@@ -118,6 +121,179 @@ impl<Type, const SIZE: usize> std::ops::IndexMut<usize> for SVec<Type, SIZE>
 	fn index_mut(&mut self, index: usize) -> &mut Self::Output
 	{
 		&mut self.as_mut_slice()[index]
+	}
+}
+
+impl<Type, const SIZE: usize> std::ops::Deref for SVec<Type, SIZE>
+{
+	type Target = [Type];
+	
+	fn deref(&self) -> &Self::Target
+	{
+		self.as_slice()
+	}
+}
+
+impl<Type, const SIZE: usize> std::ops::DerefMut for SVec<Type, SIZE>
+{
+	fn deref_mut(&mut self) -> &mut Self::Target
+	{
+		self.as_mut_slice()
+	}
+}
+
+impl<Type, const SIZE: usize> std::hash::Hash for SVec<Type, SIZE>
+where Type: std::hash::Hash
+{
+	fn hash<H: std::hash::Hasher>(&self, state: &mut H)
+	{
+		std::hash::Hash::hash(self.as_slice(), state)
+	}
+}
+
+impl<Type, const SIZE: usize> std::cmp::PartialEq<[Type]> for SVec<Type, SIZE>
+where Type: std::cmp::PartialEq
+{
+	fn eq(&self, other: &[Type]) -> bool
+	{
+		std::cmp::PartialEq::eq(self.as_slice(), other)
+	}
+}
+
+impl<Type, const SIZE: usize, const OSIZE: usize> std::cmp::PartialEq<SVec<Type, OSIZE>> for SVec<Type, SIZE>
+where Type: std::cmp::PartialEq
+{
+	fn eq(&self, other: &SVec<Type, OSIZE>) -> bool
+	{
+		std::cmp::PartialEq::eq(self.as_slice(), other.as_slice())
+	}
+}
+
+impl<Type, const SIZE: usize> std::cmp::Eq for SVec<Type, SIZE>
+where Type: std::cmp::Eq
+{
+}
+
+impl<Type, const SIZE: usize> std::cmp::PartialOrd<[Type]> for SVec<Type, SIZE>
+where Type: std::cmp::PartialOrd
+{
+	fn partial_cmp(&self, other: &[Type]) -> Option<std::cmp::Ordering>
+	{
+		std::cmp::PartialOrd::partial_cmp(self.as_slice(), other)
+	}
+}
+
+impl<Type, const SIZE: usize, const OSIZE: usize> std::cmp::PartialOrd<SVec<Type, OSIZE>> for SVec<Type, SIZE>
+where Type: std::cmp::PartialOrd
+{
+	fn partial_cmp(&self, other: &SVec<Type, OSIZE>) -> Option<std::cmp::Ordering>
+	{
+		std::cmp::PartialOrd::partial_cmp(self.as_slice(), other.as_slice())
+	}
+}
+
+impl<Type, const SIZE: usize> std::cmp::Ord for SVec<Type, SIZE>
+where Type: std::cmp::Ord
+{
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering
+	{
+		std::cmp::Ord::cmp(self.as_slice(), other.as_slice())
+	}
+}
+
+impl<Type, const SIZE: usize> std::iter::FromIterator<Type> for SVec<Type, SIZE>
+{
+	fn from_iter<T: IntoIterator<Item = Type>>(iter: T) -> Self
+	{
+		let mut result = Self::new();
+		result.extend(iter);
+		return result;
+	}
+}
+
+impl<'t, Type, const SIZE: usize> std::iter::IntoIterator for &'t SVec<Type, SIZE>
+{
+	type Item = &'t Type;
+	type IntoIter = std::slice::Iter<'t, Type>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		self.as_slice().into_iter()
+	}
+}
+
+impl<'t, Type, const SIZE: usize> std::iter::IntoIterator for &'t mut SVec<Type, SIZE>
+{
+	type Item = &'t mut Type;
+	type IntoIter = std::slice::IterMut<'t, Type>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		self.as_mut_slice().into_iter()
+	}
+}
+
+pub struct IterVal<Type, const SIZE: usize>
+{
+	value: std::mem::ManuallyDrop<SVec<Type, SIZE>>,
+	index: usize,
+}
+
+impl<Type, const SIZE: usize> std::iter::Iterator for IterVal<Type, SIZE>
+{
+	type Item = Type;
+	
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		unsafe
+		{
+			let Some(value) = self.value.as_slice().get(self.index) else
+			{
+				return None;
+			};
+			
+			self.index += 1;
+			return Some(std::ptr::read(value));
+		}
+	}
+	
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		let result = self.value.len() - self.index;
+		return (result, Some(result));
+	}
+}
+
+impl<Type, const SIZE: usize> Drop for IterVal<Type, SIZE>
+{
+	fn drop(&mut self)
+	{
+		unsafe
+		{
+			let slice = self.value.as_mut_slice();
+			while self.index < slice.len()
+			{
+				std::ptr::drop_in_place(&mut slice[self.index]);
+				self.index += 1;
+			}
+			
+			if self.value.size & 1 != 0
+			{
+				self.value.variant.vector.deref_mut().set_len(0);
+				std::ptr::drop_in_place(self.value.variant.vector.deref_mut());
+			}
+		}
+	}
+}
+
+impl<Type, const SIZE: usize> std::iter::IntoIterator for SVec<Type, SIZE>
+{
+	type Item = Type;
+	type IntoIter = IterVal<Type, SIZE>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		IterVal {value: std::mem::ManuallyDrop::new(self), index: 0}
 	}
 }
 
@@ -210,6 +386,21 @@ impl<Type, const SIZE: usize> SVec<Type, SIZE>
 			else
 			{
 				self.variant.vector.len()
+			}
+		}
+	}
+	
+	pub fn capacity(&self) -> usize
+	{
+		unsafe
+		{
+			if self.size & 1 == 0
+			{
+				Self::STATIC_CAPACITY
+			}
+			else
+			{
+				self.variant.vector.capacity()
 			}
 		}
 	}
@@ -408,4 +599,69 @@ fn test_svec_pop_simple()
 	assert!(svec.is_empty());
 	assert_eq!(0, svec.len());
 	assert_eq!(None, svec.pop());
+}
+
+#[test]
+fn test_svec_iter_val_boxed_single()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	svec.push(Box::new(0));
+	
+	for v in svec
+	{
+		assert_eq!(0, *v);
+	}
+}
+
+#[test]
+fn test_svec_iter_val_boxed_single_drop()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	svec.push(Box::new(0));
+	let _ = svec.into_iter();
+}
+
+#[test]
+fn test_svec_iter_val_boxed_double()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	svec.push(Box::new(0));
+	svec.push(Box::new(0));
+	
+	let mut it = svec.into_iter();
+	assert_eq!(0, *it.next().unwrap());
+}
+
+#[test]
+fn test_svec_iter_val_boxed_multiple()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	
+	for _ in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
+	{
+		svec.push(Box::new(0));
+	}
+	
+	for v in svec
+	{
+		assert_eq!(0, *v);
+	}
+}
+
+#[test]
+fn test_svec_iter_val_boxed_multiple_drop()
+{
+	type TSvec = SVec::<Box<i32>, 4>;
+	let mut svec = TSvec::new();
+	
+	for _ in 1 .. TSvec::STATIC_CAPACITY as i32 + 2
+	{
+		svec.push(Box::new(0));
+	}
+	
+	let _ = svec.into_iter();
 }
