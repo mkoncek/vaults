@@ -35,6 +35,15 @@ impl<Type, const SIZE: usize> Default for SVec<Type, SIZE>
 	fn default() -> Self {Self::new()}
 }
 
+impl<Type, const SIZE: usize> std::fmt::Debug for SVec<Type, SIZE>
+where Type: std::fmt::Debug
+{
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+	{
+		std::fmt::Debug::fmt(self.as_slice(), f)
+	}
+}
+
 impl<Type, const SIZE: usize> Clone for SVec<Type, SIZE>
 where Type: Clone
 {
