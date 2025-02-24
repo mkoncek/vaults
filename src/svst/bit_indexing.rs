@@ -347,32 +347,50 @@ const fn max_levels() -> usize
 #[derive(Debug, Clone, Copy)]
 struct Levels
 {
-	bitfield: usize,
-}
-
-impl Levels
-{
-	const WIDTH: u32 = (IndexType::BITS - 1).trailing_ones();
-}
-
-impl std::iter::Iterator for Levels
-{
-	type Item = usize;
-	
-	fn next(&mut self) -> Option<Self::Item>
-	{
-		todo!()
-	}
+	bitfield: u128,
+	pub len: u8,
 }
 
 impl From<usize> for Levels
 {
 	fn from(value: usize) -> Self
 	{
-		let mut result = Self {bitfield: value};
-		let sector = (usize::BITS - result.bitfield.leading_zeros() + Self::WIDTH - 1) / Self::WIDTH;
-		result.bitfield += (1 << ((sector.saturating_sub(2) + 1) * Self::WIDTH)) - 1;
+		let mut result = Self {bitfield: 0, len: 0};
+		let mut size = level_length(value);
+		let mut shift: u8 = 64;
+		
+		while size != 1
+		{
+			result.len += 1;
+			size = level_length(size);
+			result.bitfield |= (size as u128) << shift;
+			
+			shift /= 2;
+		}
+		
+		assert_ne!(0, shift);
+		
+		shift *= 2;
+		
+		while shift <= 64
+		{
+			let mut addition = (result.bitfield >> (shift / 2)) & ((shift / 2) as u128 - 1);
+			addition <<= shift;
+			result.bitfield += addition;
+			shift *= 2;
+		}
+		
 		return result;
+	}
+}
+
+impl Levels
+{
+	pub fn at(&self, index: u8) -> usize
+	{
+		assert!(index < self.len.max(1), "Levels::at: index is {}, but self.len is {}", index, self.len);
+		let shift = 64 / (1 << index);
+		return ((self.bitfield >> shift) & (shift as u128 - 1)) as usize;
 	}
 }
 
@@ -397,12 +415,7 @@ fn test_levels()
 	*/
 }
 
-pub fn find_empty(index_span: &mut [IndexType], size: usize) -> usize
-{
-	todo!()
-}
-
-pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
+pub fn _push_front(index_span: &mut [IndexType], size: usize) -> usize
 {
 	let mut sizes = [0_usize; 6];
 	let mut sizes_len: usize = 0;
@@ -453,16 +466,57 @@ pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
 		
 		let modulus = position % IndexType::BITS as usize;
 		position /= IndexType::BITS as usize;
-		let offset;
-		
-		if i + 1 == sizes.len()
+		let offset = if i + 1 == sizes.len()
 		{
-			offset = 0;
+			0
 		}
 		else
 		{
-			offset = sizes[i + 1];
+			sizes[i + 1]
+		};
+		
+		index_span[offset + position] |= 1 << modulus;
+	}
+	
+	return result;
+}
+
+pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
+{
+	let levels = Levels::from(size);
+	let mut position = 0;
+	
+	if levels.len > 0
+	{
+		position = index_span[0].trailing_ones() as usize;
+		
+		for i in (1 .. levels.len).rev()
+		{
+			position = position * IndexType::BITS as usize + index_span[levels.at(i) + position].trailing_ones() as usize;
 		}
+	}
+	
+	let result = position * IndexType::BITS as usize + index_span[levels.at(0) + position].trailing_ones() as usize;
+	
+	index_span[levels.at(0) + position] |= 1 << (result % IndexType::BITS as usize);
+	
+	for i in 0 .. levels.len
+	{
+		if ! index_span[levels.at(i) + position] != 0
+		{
+			break;
+		}
+		
+		let modulus = position % IndexType::BITS as usize;
+		position /= IndexType::BITS as usize;
+		let offset = if i + 1 == levels.len
+		{
+			0
+		}
+		else
+		{
+			levels.at(i + 1)
+		};
 		
 		index_span[offset + position] |= 1 << modulus;
 	}

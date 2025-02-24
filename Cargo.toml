@@ -10,6 +10,9 @@ license-file = "LICENSE"
 [profile.release]
 debug = true
 
+[profile.bench]
+debug = true
+
 [[bin]]
 name = "bench"
 path = "src/bench.rs"
