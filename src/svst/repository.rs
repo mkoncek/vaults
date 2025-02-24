@@ -68,18 +68,18 @@ impl<Type> Repository<Type>
 	/// Note that the slice may contain dropped values.
 	pub unsafe fn as_slice(&self) -> &[Type]
 	{
-		unsafe {std::slice::from_raw_parts(self.storage.data.as_ptr()
+		std::slice::from_raw_parts(self.storage.data.as_ptr()
 			.offset(Self::array_offset(self.index_length) as isize).cast::<Type>(), self.capacity()
-		)}
+		)
 	}
 	
 	/// Returns a mutable slice containing the values of the repository.
 	/// Note that the slice may contain dropped values.
 	pub unsafe fn as_mut_slice(&mut self) -> &mut [Type]
 	{
-		unsafe {std::slice::from_raw_parts_mut(self.storage.data.as_ptr()
+		std::slice::from_raw_parts_mut(self.storage.data.as_ptr()
 			.offset(Self::array_offset(self.index_length) as isize).cast::<Type>(), self.capacity()
-		)}
+		)
 	}
 	
 	/// Inserts a value in the repository returning its index within the repository.
@@ -345,16 +345,6 @@ impl<Type> Drop for Repository<Type>
 impl<Type> Default for Repository<Type>
 {
 	fn default() -> Self {Self::new()}
-}
-
-impl<Type> AsRef<Repository<Type>> for Repository<Type>
-{
-	fn as_ref(&self) -> &Repository<Type> {self}
-}
-
-impl<Type> AsMut<Repository<Type>> for Repository<Type>
-{
-	fn as_mut(&mut self) -> &mut Repository<Type> {self}
 }
 
 impl<Type> Clone for Repository<Type>
