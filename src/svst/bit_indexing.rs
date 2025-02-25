@@ -388,7 +388,7 @@ impl Levels
 {
 	pub fn at(&self, index: u8) -> usize
 	{
-		assert!(index < self.len.max(1), "index is {}, but self.len is {}", index, self.len);
+		assert!(index < self.len.max(1), "index is {} but len is {}", index, self.len);
 		let shift = 64 / (1 << index);
 		return ((self.bitfield >> shift) & (shift as u128 - 1)) as usize;
 	}

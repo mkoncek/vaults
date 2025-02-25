@@ -82,6 +82,22 @@ impl<KeyType> Set<KeyType>
 			nodes: unsafe {self.repository.as_slice()},
 		}
 	}
+	
+	pub unsafe fn get_at_unchecked(&self, position: usize) -> &KeyType
+	{
+		&self.impl_get_at_unchecked(position).0
+	}
+}
+
+impl<'t, Type> std::iter::IntoIterator for &'t Set<Type>
+{
+	type Item = &'t Type;
+	type IntoIter = aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		self.iter()
+	}
 }
 
 impl<'t, Type> std::iter::Iterator for aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>
