@@ -89,17 +89,6 @@ impl<KeyType> Set<KeyType>
 	}
 }
 
-impl<'t, Type> std::iter::IntoIterator for &'t Set<Type>
-{
-	type Item = &'t Type;
-	type IntoIter = aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>;
-	
-	fn into_iter(self) -> Self::IntoIter
-	{
-		self.iter()
-	}
-}
-
 impl<'t, Type> std::iter::Iterator for aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>
 {
 	type Item = &'t Type;
@@ -123,6 +112,17 @@ impl<'t, Type> std::iter::DoubleEndedIterator for aa::node::Iterator<&'t [aa::no
 			usize::MAX => None,
 			i => Some(&self.nodes[i].as_ref().0),
 		}
+	}
+}
+
+impl<'t, Type> std::iter::IntoIterator for &'t Set<Type>
+{
+	type Item = &'t Type;
+	type IntoIter = aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		self.iter()
 	}
 }
 

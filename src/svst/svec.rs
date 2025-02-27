@@ -262,6 +262,32 @@ impl<Type, const SIZE: usize> std::iter::Iterator for IterVal<Type, SIZE>
 		let result = self.value.len() - self.index;
 		return (result, Some(result));
 	}
+	
+	fn count(self) -> usize where Self: Sized,
+	{
+		self.len()
+	}
+	
+	fn last(mut self) -> Option<Self::Item> where Self: Sized,
+	{
+		self.next_back()
+	}
+}
+
+impl<Type, const SIZE: usize> std::iter::DoubleEndedIterator for IterVal<Type, SIZE>
+{
+	fn next_back(&mut self) -> Option<Self::Item>
+	{
+		self.value.pop()
+	}
+}
+
+impl<Type, const SIZE: usize> std::iter::ExactSizeIterator for IterVal<Type, SIZE>
+{
+	fn len(&self) -> usize
+	{
+		self.value.len() - self.index
+	}
 }
 
 impl<Type, const SIZE: usize> Drop for IterVal<Type, SIZE>
