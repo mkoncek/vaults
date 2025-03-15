@@ -250,7 +250,7 @@ impl<Type> Tree<Type>
 		Ok(())
 	}
 	
-	pub(crate) fn to_dot(&self, writer: &mut impl std::io::Write) -> std::io::Result<()>
+	pub fn _to_dot(&self, writer: &mut impl std::io::Write) -> std::io::Result<()>
 	{
 		writeln!(writer, "digraph tree {{")?;
 		if self.root != usize::MAX
