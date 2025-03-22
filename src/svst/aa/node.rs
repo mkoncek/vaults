@@ -185,12 +185,13 @@ where
 	return index;
 }
 
-pub(super) fn find<Key, Nodes, Type>(nodes: &Nodes, root: usize, key: &Key) -> (usize, usize, usize)
+pub(super) fn find<Key, Nodes, Type, Compare>(nodes: &Nodes, root: usize, key: &Key, comapre: &Compare) -> (usize, usize, usize)
 where
 	Nodes: ?Sized + std::ops::Index<usize, Output = Node<Type>>,
 	Type: Entry,
-	Type::Key: std::borrow::Borrow<Key> + std::cmp::Ord,
-	Key: ?Sized + std::cmp::Ord,
+	Type::Key: std::borrow::Borrow<Key>,
+	Key: ?Sized,
+	Compare: crate::Comparator<Key>,
 {
 	let mut desc = root;
 	let mut parent = usize::MAX;
@@ -200,7 +201,7 @@ where
 	{
 		parent = desc;
 		
-		match key.cmp(nodes[desc].value.key().borrow())
+		match comapre.compare(key, nodes[desc].value.key().borrow())
 		{
 			std::cmp::Ordering::Less =>
 			{

@@ -11,49 +11,52 @@ impl<KeyType> aa::node::Entry for SetEntry<KeyType>
 	fn value(self) -> Self::Value {self.0}
 }
 
-pub type Set<KeyType> = aa::tree::Tree<SetEntry<KeyType>>;
+pub type Set<KeyType, Compare = crate::DefaultComparator> = aa::tree::Tree<SetEntry<KeyType>, Compare>;
 
-impl<KeyType> Set<KeyType>
+impl<KeyType, Compare> Set<KeyType, Compare>
 {
 	pub fn first(&self) -> Option<&KeyType> {self.impl_first().map(|k| &k.0)}
 	pub fn last(&self) -> Option<&KeyType> {self.impl_last().map(|k| &k.0)}
 	
 	pub fn contains<Key>(&self, key: &Key) -> bool
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
-		aa::node::find(unsafe {self.repository.as_slice()}, self.root, key).0 != usize::MAX
+		aa::node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0 != usize::MAX
 	}
 	
 	pub fn get<Key>(&self, key: &Key) -> Option<&KeyType>
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
 		self.impl_get(key).map(|k| &k.0)
 	}
 	
 	pub fn insert(&mut self, value: KeyType) -> bool
 	where
-		KeyType: std::cmp::Ord
+		Compare: crate::Comparator<KeyType>,
 	{
 		self.try_insert(SetEntry {0: value}, |v| v.is_none())
 	}
 	
 	pub fn replace(&mut self, value: KeyType) -> Option<KeyType>
 	where
-		KeyType: std::cmp::Ord
+		Compare: crate::Comparator<KeyType>,
 	{
 		self.try_insert(SetEntry {0: value}, |v| v.map(|v| v.0))
 	}
 	
 	pub fn remove<Key>(&mut self, value: &Key) -> bool
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
-		let index = aa::node::find(unsafe {self.repository.as_slice()}, self.root, value).0;
+		let index = aa::node::find(unsafe {self.repository.as_slice()}, self.root, value, &self.compare).0;
 		
 		if index != usize::MAX
 		{

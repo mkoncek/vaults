@@ -12,35 +12,38 @@ impl<KeyType, MappedType> aa::node::Entry for MapEntry<KeyType, MappedType>
 	fn value(self) -> Self::Value {(self.0, self.1)}
 }
 
-pub type Map<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>>;
+pub type Map<KeyType, MappedType, Compare = crate::DefaultComparator> = aa::tree::Tree<MapEntry<KeyType, MappedType>, Compare>;
 
-impl<KeyType, MappedType> Map<KeyType, MappedType>
+impl<KeyType, MappedType, Compare> Map<KeyType, MappedType, Compare>
 {
 	pub fn first_key_value(&self) -> Option<(&KeyType, &MappedType)> {self.impl_first().map(|v| (&v.0, &v.1))}
 	pub fn last_key_value(&self) -> Option<(&KeyType, &MappedType)> {self.impl_last().map(|v| (&v.0, &v.1))}
 	
 	pub fn contains_key<Key>(&self, key: &Key) -> bool
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
-		aa::node::find(unsafe {self.repository.as_slice()}, self.root, key).0 != usize::MAX
+		aa::node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0 != usize::MAX
 	}
 	
 	pub fn get<Key>(&self, key: &Key) -> Option<&MappedType>
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
 		self.impl_get(key).map(|v| &v.1)
 	}
 	
 	pub fn get_mut<Key>(&mut self, key: &Key) -> Option<&mut MappedType>
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
-		let index = node::find(unsafe {self.repository.as_mut_slice()}, self.root, key).0;
+		let index = node::find(unsafe {self.repository.as_mut_slice()}, self.root, key, &self.compare).0;
 		
 		if index != usize::MAX
 		{
@@ -52,33 +55,36 @@ impl<KeyType, MappedType> Map<KeyType, MappedType>
 	
 	pub fn get_key_value<Key>(&self, key: &Key) -> Option<(&KeyType, &MappedType)>
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
 		self.impl_get(key).map(|v| (&v.0, &v.1))
 	}
 	
 	pub fn insert(&mut self, key: KeyType, mapped: MappedType) -> Option<MappedType>
 	where
-		KeyType: std::cmp::Ord
+		Compare: crate::Comparator<KeyType>,
 	{
 		self.try_insert(MapEntry {0: key, 1: mapped}, |v| v.map(|v| v.1))
 	}
 	
 	pub fn remove<Key>(&mut self, key: &Key) -> Option<MappedType>
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
 		return self.remove_entry(key).map(|v| v.1);
 	}
 	
 	pub fn remove_entry<Key>(&mut self, key: &Key) -> Option<(KeyType, MappedType)>
 	where
-		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		KeyType: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
 	{
-		let index = aa::node::find(unsafe {self.repository.as_slice()}, self.root, key).0;
+		let index = aa::node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0;
 		
 		if index != usize::MAX
 		{
@@ -119,10 +125,11 @@ impl<KeyType, MappedType> Map<KeyType, MappedType>
 	}
 }
 
-impl<Key, KeyType, MappedType> std::ops::Index<&Key> for Map<KeyType, MappedType>
+impl<Key, KeyType, MappedType, Compare> std::ops::Index<&Key> for Map<KeyType, MappedType, Compare>
 where
-	KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
-	Key: ?Sized + std::cmp::Ord,
+	KeyType: std::borrow::Borrow<Key>,
+	Key: ?Sized,
+	Compare: crate::Comparator<Key>,
 {
 	type Output = MappedType;
 	

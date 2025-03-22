@@ -2,15 +2,16 @@ use crate::svst::aa::node;
 use crate::svst::repository::Repository;
 
 #[derive(Debug)]
-pub struct Tree<Type>
+pub struct Tree<Type, Compare = crate::DefaultComparator>
 {
 	pub(super) root: usize,
 	pub(super) first: usize,
 	pub(super) last: usize,
 	pub(super) repository: Repository<node::Node<Type>>,
+	pub(super) compare: Compare,
 }
 
-impl<Type> Tree<Type>
+impl<Type> Tree<Type, crate::DefaultComparator>
 {
 	pub const fn new() -> Self
 	{
@@ -20,6 +21,22 @@ impl<Type> Tree<Type>
 			first: usize::MAX,
 			last: usize::MAX,
 			repository: Repository::new(),
+			compare: crate::DefaultComparator::new(),
+		}
+	}
+}
+
+impl<Type, Compare> Tree<Type, Compare>
+{
+	pub fn with_comparator(compare: Compare) -> Self
+	{
+		Self
+		{
+			root: usize::MAX,
+			first: usize::MAX,
+			last: usize::MAX,
+			repository: Repository::new(),
+			compare,
 		}
 	}
 	
@@ -43,8 +60,8 @@ impl<Type> Tree<Type>
 	pub(super) fn try_insert<Consumer, ResultType>(&mut self, value: Type, consumer: Consumer) -> ResultType
 	where
 		Type: node::Entry,
-		Type::Key: std::cmp::Ord,
-		Consumer: std::ops::FnOnce(Option<Type>) -> ResultType
+		Consumer: std::ops::FnOnce(Option<Type>) -> ResultType,
+		Compare: crate::Comparator<Type::Key>
 	{
 		if self.is_empty()
 		{
@@ -55,7 +72,7 @@ impl<Type> Tree<Type>
 		}
 		
 		let mut values = unsafe {self.repository.as_mut_slice()};
-		let (mut position, parent, parent_index) = node::find(values, self.root, value.key());
+		let (mut position, parent, parent_index) = node::find(values, self.root, value.key(), &self.compare);
 		
 		if position != usize::MAX
 		{
@@ -172,10 +189,11 @@ impl<Type> Tree<Type>
 	pub(super) fn impl_get<Key>(&self, key: &Key) -> Option<&Type>
 	where
 		Type: node::Entry,
-		Type::Key: std::borrow::Borrow<Key> + std::cmp::Ord,
-		Key: ?Sized + std::cmp::Ord,
+		Type::Key: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>
 	{
-		let index = node::find(unsafe {self.repository.as_slice()}, self.root, key).0;
+		let index = node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0;
 		
 		if index != usize::MAX
 		{
@@ -236,12 +254,12 @@ impl<Type> Tree<Type>
 	}
 }
 
-impl<Type> Default for Tree<Type>
+impl<Type> Default for Tree<Type, crate::DefaultComparator>
 {
 	fn default() -> Self {Self::new()}
 }
 
-impl<Type> Tree<Type>
+impl<Type, Compare> Tree<Type, Compare>
 {
 	fn to_dot_node(&self, index: usize, writer: &mut impl std::io::Write) -> std::io::Result<()>
 	{
