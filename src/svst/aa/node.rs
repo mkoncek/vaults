@@ -43,19 +43,408 @@ impl<Type> Node<Type>
 	pub fn value(self) -> Type {self.value}
 }
 
-pub(super) fn get_parent_index<Nodes, Type>(nodes: &Nodes, index: usize, parent: usize) -> usize
-where
-	Nodes: ?Sized + std::ops::Index<usize, Output = Node<Type>>
+pub(super) trait AA<Type>:
+	std::ops::Index<usize, Output = Node<Type>> +
+	std::ops::IndexMut<usize, Output = Node<Type>> +
 {
-	for i in 0 .. 2
+	fn get_parent_index(&self, index: usize, parent: usize) -> usize
 	{
-		if nodes[parent].descendants[i] == index
+		for i in 0 .. 2
 		{
-			return i;
+			if self[parent].descendants[i] == index
+			{
+				return i;
+			}
 		}
+		
+		unreachable!();
 	}
 	
-	unreachable!();
+	fn skew(&mut self, index: usize) -> usize
+	{
+		let l_index = self[index].descendants[0];
+		
+		if l_index == usize::MAX
+		{
+			return index;
+		}
+		else if self[index].level == self[l_index].level
+		{
+			let lrdesc = self[l_index].descendants[1];
+			
+			if lrdesc != usize::MAX
+			{
+				self[lrdesc].parent = index;
+			}
+			
+			self[l_index].parent = self[index].parent;
+			self[index].parent = l_index;
+			
+			self[index].descendants[0] = self[l_index].descendants[1];
+			self[l_index].descendants[1] = index;
+			
+			return l_index;
+		}
+		
+		return index;
+	}
+	
+	fn split(&mut self, index: usize) -> usize
+	{
+		let r_index = self[index].descendants[1];
+		
+		if r_index == usize::MAX || self[r_index].descendants[1] == usize::MAX
+		{
+			return index;
+		}
+		else if self[index].level == self[self[r_index].descendants[1]].level
+		{
+			let rldesc = self[r_index].descendants[0];
+			
+			if rldesc != usize::MAX
+			{
+				self[rldesc].parent = index;
+			}
+			
+			self[r_index].parent = self[index].parent;
+			self[index].parent = r_index;
+			
+			self[index].descendants[1] = self[r_index].descendants[0];
+			self[r_index].descendants[0] = index;
+			self[r_index].level = self[r_index].level + 1;
+			
+			return r_index;
+		}
+		
+		return index;
+	}
+	
+	fn find<Key, Compare>(&self, root: usize, key: &Key, comapre: &Compare) -> (usize, usize, usize)
+	where
+		Type: Entry,
+		Type::Key: std::borrow::Borrow<Key>,
+		Key: ?Sized,
+		Compare: crate::Comparator<Key>,
+	{
+		let mut desc = root;
+		let mut parent = usize::MAX;
+		let mut parent_index: usize = 0;
+		
+		while desc != usize::MAX
+		{
+			parent = desc;
+			
+			match comapre.compare(key, self[desc].value.key().borrow())
+			{
+				std::cmp::Ordering::Less =>
+				{
+					parent_index = 0;
+					desc = self[desc].descendants[parent_index as usize];
+				},
+				std::cmp::Ordering::Greater =>
+				{
+					parent_index = 1;
+					desc = self[desc].descendants[parent_index as usize];
+				},
+				std::cmp::Ordering::Equal =>
+				{
+					break;
+				}
+			}
+		}
+		
+		return (desc, parent, parent_index);
+	}
+	
+	fn swap_nodes(&mut self, index: usize, successor: usize)
+	{
+		if index == successor
+		{
+			unreachable!();
+		}
+		
+		let parent = self[index].parent;
+		let successor_rdes = self[successor].descendants[1];
+		
+		if self[index].descendants[1] == successor
+		{
+			self[index].parent = successor;
+			self[successor].descendants[1] = index;
+		}
+		else
+		{
+			self[index].parent = self[successor].parent;
+			self[successor].descendants[1] = self[index].descendants[1];
+			let successor_parent = self[successor].parent;
+			self[successor_parent].descendants[0] = index;
+			self[index].parent = successor_parent;
+			let index = self[index].descendants[1];
+			self[index].parent = successor;
+		}
+		
+		self[successor].parent = parent;
+		
+		if parent != usize::MAX
+		{
+			let parent_index = self.get_parent_index(index, parent);
+			self[parent].descendants[parent_index] = successor;
+		}
+		
+		let index_ldes = self[index].descendants[0];
+		self[successor].descendants[0] = index_ldes;
+		self[index].descendants[0] = usize::MAX;
+		
+		if index_ldes != usize::MAX
+		{
+			self[index_ldes].parent = successor;
+		}
+		
+		self[index].descendants[1] = successor_rdes;
+		
+		{
+			let level = self[index].level;
+			self[index].level = self[successor].level;
+			self[successor].level = level;
+		}
+		
+	// 	NOTE unnecessary, this is set in `erase_rebalance`
+	// 	if (successor_rdes != -1)
+	// 	{
+	// 		set_parent(self[successor_rdes], index);
+	// 	}
+	}
+	
+	const CHANGE_PROPAGATION_DISTANCE: i32 = 3;
+	
+	fn insert_rebalance(&mut self, mut parent: usize,
+		mut parent_index: usize, mut index: usize) -> bool
+	{
+		self[index].parent = parent;
+		self[parent].descendants[parent_index] = index;
+		
+		let mut changes = Self::CHANGE_PROPAGATION_DISTANCE;
+		
+		while {index = parent; parent = self[parent].parent;
+			parent != usize::MAX && changes > 0
+		}
+		{
+			parent_index = self.get_parent_index(index, parent);
+			
+			changes -= 1;
+			
+			let nv = self.skew(index);
+			
+			if nv != index
+			{
+				index = nv;
+				changes = Self::CHANGE_PROPAGATION_DISTANCE;
+			}
+			
+			let nv = self.split(index);
+			
+			if nv != index
+			{
+				index = nv;
+				changes = Self::CHANGE_PROPAGATION_DISTANCE;
+			}
+			
+			self[index].parent = parent;
+			self[parent].descendants[parent_index] = index;
+		}
+		
+		return changes > 0;
+	}
+	
+	fn erase_rebalance_leaf(&mut self, mut index: usize) -> usize
+	{
+		if self[index].level != 0
+		{
+			unreachable!();
+		}
+		
+		let mut rdes = self[index].descendants[1];
+		let mut parent = self[index].parent;
+		
+		if rdes != usize::MAX
+		{
+			self[rdes].parent = parent;
+		}
+		
+		if parent == usize::MAX
+		{
+			return self[index].descendants[1];
+		}
+		
+		{
+			let parent_index = self.get_parent_index(index, parent);
+			self[parent].descendants[parent_index] = rdes;
+		}
+		
+		let mut changes = Self::CHANGE_PROPAGATION_DISTANCE;
+		
+		loop
+		{
+			changes -= 1;
+			index = parent;
+			parent = self[parent].parent;
+			let mut parent_index = usize::MAX;
+			
+			if parent != usize::MAX
+			{
+				parent_index = self.get_parent_index(index, parent);
+			}
+			
+			let mut level = -1;
+			
+			{
+				let ldes = self[index].descendants[0];
+				
+				if ldes != usize::MAX
+				{
+					level = self[ldes].level;
+				}
+			}
+			
+			rdes = self[index].descendants[1];
+			
+			if rdes != usize::MAX
+			{
+				let rlevel = self[rdes].level;
+				
+				if rlevel < level
+				{
+					level = rlevel;
+				}
+			}
+			else
+			{
+				level = -1;
+			}
+			
+			level += 1;
+			
+			if level < self[index].level
+			{
+				changes = Self::CHANGE_PROPAGATION_DISTANCE;
+				
+				self[index].level = level;
+				
+				if rdes != usize::MAX && level < self[rdes].level
+				{
+					self[rdes].level = level;
+				}
+			}
+			
+			{
+				let new_index = self.skew(index);
+				
+				if new_index != index
+				{
+					index = new_index;
+					changes = Self::CHANGE_PROPAGATION_DISTANCE;
+				}
+			}
+			{
+				let mut rdes = self[index].descendants[1];
+				
+				if rdes != usize::MAX
+				{
+					rdes = self.skew(rdes);
+					
+					if rdes != self[index].descendants[1]
+					{
+						self[index].descendants[1] = rdes;
+						changes = Self::CHANGE_PROPAGATION_DISTANCE;
+					}
+					
+					let mut rrdes = self[rdes].descendants[1];
+					
+					if rrdes != usize::MAX
+					{
+						rrdes = self.skew(rrdes);
+						
+						if rrdes != self[rdes].descendants[1]
+						{
+							self[rdes].descendants[1] = rrdes;
+							changes = Self::CHANGE_PROPAGATION_DISTANCE;
+						}
+					}
+				}
+			}
+			{
+				let new_index = self.split(index);
+				
+				if new_index != index
+				{
+					index = new_index;
+					changes = Self::CHANGE_PROPAGATION_DISTANCE;
+				}
+			}
+			{
+				let mut rdes = self[index].descendants[1];
+				
+				if rdes != usize::MAX
+				{
+					rdes = self.split(rdes);
+					
+					if rdes != self[index].descendants[1]
+					{
+						self[index].descendants[1] = rdes;
+						changes = Self::CHANGE_PROPAGATION_DISTANCE;
+					}
+				}
+			}
+			
+			if parent != usize::MAX
+			{
+				self[parent].descendants[parent_index] = index;
+			}
+			
+			if parent == usize::MAX || changes == 0
+			{
+				break;
+			}
+		}
+		
+		return if parent == usize::MAX {index} else {usize::MAX};
+	}
+	
+	fn find_successor(&mut self, mut index: usize) -> usize
+	{
+		if self[index].level == 0
+		{
+			return usize::MAX;
+		}
+		
+		index = self[index].descendants[1];
+		
+		while self[index].level > 0
+		{
+			index = self[index].descendants[0];
+		}
+		
+		return index;
+	}
+	
+	fn erase_rebalance(&mut self, index: usize) -> usize
+	{
+		let successor = self.find_successor(index);
+		
+		if successor != usize::MAX
+		{
+			self.swap_nodes(index, successor);
+		}
+		
+		return self.erase_rebalance_leaf(index);
+	}
+}
+
+impl<Indexable, Type> AA<Type> for Indexable
+where
+	Indexable: ?Sized,
+	Indexable: std::ops::Index<usize, Output = Node<Type>>,
+	Indexable: std::ops::IndexMut<usize, Output = Node<Type>>,
+{
 }
 
 pub struct Iterator<Nodes: ?Sized>
@@ -103,7 +492,7 @@ macro_rules! iter_impl
 					{
 						$this.bounds[1 - $index] = usize::MAX;
 					}
-					else if $crate::svst::aa::node::get_parent_index($this.nodes, $this.bounds[$index], parent) == 1 - $index
+					else if $crate::svst::aa::node::AA::get_parent_index($this.nodes, $this.bounds[$index], parent) == 1 - $index
 					{
 						$this.bounds[$index] = parent;
 						continue;
@@ -121,396 +510,3 @@ macro_rules! iter_impl
 }
 
 pub(super) use iter_impl;
-
-pub(super) fn skew<Nodes, Type>(nodes: &mut Nodes, index: usize) -> usize
-where
-	Nodes: ?Sized + std::ops::IndexMut<usize, Output = Node<Type>>
-{
-	let l_index = nodes[index].descendants[0];
-	
-	if l_index == usize::MAX
-	{
-		return index;
-	}
-	else if nodes[index].level == nodes[l_index].level
-	{
-		let lrdesc = nodes[l_index].descendants[1];
-		
-		if lrdesc != usize::MAX
-		{
-			nodes[lrdesc].parent = index;
-		}
-		
-		nodes[l_index].parent = nodes[index].parent;
-		nodes[index].parent = l_index;
-		
-		nodes[index].descendants[0] = nodes[l_index].descendants[1];
-		nodes[l_index].descendants[1] = index;
-		
-		return l_index;
-	}
-	
-	return index;
-}
-
-pub(super) fn split<Nodes, Type>(nodes: &mut Nodes, index: usize) -> usize
-where
-	Nodes: ?Sized + std::ops::IndexMut<usize, Output = Node<Type>>
-{
-	let r_index = nodes[index].descendants[1];
-	
-	if r_index == usize::MAX || nodes[r_index].descendants[1] == usize::MAX
-	{
-		return index;
-	}
-	else if nodes[index].level == nodes[nodes[r_index].descendants[1]].level
-	{
-		let rldesc = nodes[r_index].descendants[0];
-		
-		if rldesc != usize::MAX
-		{
-			nodes[rldesc].parent = index;
-		}
-		
-		nodes[r_index].parent = nodes[index].parent;
-		nodes[index].parent = r_index;
-		
-		nodes[index].descendants[1] = nodes[r_index].descendants[0];
-		nodes[r_index].descendants[0] = index;
-		nodes[r_index].level = nodes[r_index].level + 1;
-		
-		return r_index;
-	}
-	
-	return index;
-}
-
-pub(super) fn find<Key, Nodes, Type, Compare>(nodes: &Nodes, root: usize, key: &Key, comapre: &Compare) -> (usize, usize, usize)
-where
-	Nodes: ?Sized + std::ops::Index<usize, Output = Node<Type>>,
-	Type: Entry,
-	Type::Key: std::borrow::Borrow<Key>,
-	Key: ?Sized,
-	Compare: crate::Comparator<Key>,
-{
-	let mut desc = root;
-	let mut parent = usize::MAX;
-	let mut parent_index: usize = 0;
-	
-	while desc != usize::MAX
-	{
-		parent = desc;
-		
-		match comapre.compare(key, nodes[desc].value.key().borrow())
-		{
-			std::cmp::Ordering::Less =>
-			{
-				parent_index = 0;
-				desc = nodes[desc].descendants[parent_index as usize];
-			},
-			std::cmp::Ordering::Greater =>
-			{
-				parent_index = 1;
-				desc = nodes[desc].descendants[parent_index as usize];
-			},
-			std::cmp::Ordering::Equal =>
-			{
-				break;
-			}
-		}
-	}
-	
-	return (desc, parent, parent_index);
-}
-
-pub(super) fn swap_nodes<Nodes, Type>(nodes: &mut Nodes, index: usize, successor: usize)
-where
-	Nodes: ?Sized + std::ops::IndexMut<usize, Output = Node<Type>>
-{
-	if index == successor
-	{
-		unreachable!();
-	}
-	
-	let parent = nodes[index].parent;
-	let successor_rdes = nodes[successor].descendants[1];
-	
-	if nodes[index].descendants[1] == successor
-	{
-		nodes[index].parent = successor;
-		nodes[successor].descendants[1] = index;
-	}
-	else
-	{
-		nodes[index].parent = nodes[successor].parent;
-		nodes[successor].descendants[1] = nodes[index].descendants[1];
-		let successor_parent = nodes[successor].parent;
-		nodes[successor_parent].descendants[0] = index;
-		nodes[index].parent = successor_parent;
-		let index = nodes[index].descendants[1];
-		nodes[index].parent = successor;
-	}
-	
-	nodes[successor].parent = parent;
-	
-	if parent != usize::MAX
-	{
-		let parent_index = get_parent_index(nodes, index, parent);
-		nodes[parent].descendants[parent_index] = successor;
-	}
-	
-	let index_ldes = nodes[index].descendants[0];
-	nodes[successor].descendants[0] = index_ldes;
-	nodes[index].descendants[0] = usize::MAX;
-	
-	if index_ldes != usize::MAX
-	{
-		nodes[index_ldes].parent = successor;
-	}
-	
-	nodes[index].descendants[1] = successor_rdes;
-	
-	{
-		let level = nodes[index].level;
-		nodes[index].level = nodes[successor].level;
-		nodes[successor].level = level;
-	}
-	
-// 	NOTE unnecessary, this is set in `erase_rebalance`
-// 	if (successor_rdes != -1)
-// 	{
-// 		set_parent(nodes[successor_rdes], index);
-// 	}
-}
-
-const CHANGE_PROPAGATION_DISTANCE: i32 = 3;
-
-pub(super) fn insert_rebalance<Nodes, Type>(nodes: &mut Nodes, mut parent: usize,
-	mut parent_index: usize, mut index: usize) -> bool
-where
-	Nodes: ?Sized + std::ops::IndexMut<usize, Output = Node<Type>>
-{
-	nodes[index].parent = parent;
-	nodes[parent].descendants[parent_index] = index;
-	
-	let mut changes = CHANGE_PROPAGATION_DISTANCE;
-	
-	while {index = parent; parent = nodes[parent].parent;
-		parent != usize::MAX && changes > 0
-	}
-	{
-		parent_index = get_parent_index(nodes, index, parent);
-		
-		changes -= 1;
-		
-		let nv = skew(nodes, index);
-		
-		if nv != index
-		{
-			index = nv;
-			changes = CHANGE_PROPAGATION_DISTANCE;
-		}
-		
-		let nv = split(nodes, index);
-		
-		if nv != index
-		{
-			index = nv;
-			changes = CHANGE_PROPAGATION_DISTANCE;
-		}
-		
-		nodes[index].parent = parent;
-		nodes[parent].descendants[parent_index] = index;
-	}
-	
-	return changes > 0;
-}
-
-pub(super) fn erase_rebalance_leaf<Nodes, Type>(nodes: &mut Nodes, mut index: usize) -> usize
-where
-	Nodes: ?Sized + std::ops::IndexMut<usize, Output = Node<Type>>
-{
-	if nodes[index].level != 0
-	{
-		unreachable!();
-	}
-	
-	let mut rdes = nodes[index].descendants[1];
-	let mut parent = nodes[index].parent;
-	
-	if rdes != usize::MAX
-	{
-		nodes[rdes].parent = parent;
-	}
-	
-	if parent == usize::MAX
-	{
-		return nodes[index].descendants[1];
-	}
-	
-	{
-		let parent_index = get_parent_index(nodes, index, parent);
-		nodes[parent].descendants[parent_index] = rdes;
-	}
-	
-	let mut changes = CHANGE_PROPAGATION_DISTANCE;
-	
-	loop
-	{
-		changes -= 1;
-		index = parent;
-		parent = nodes[parent].parent;
-		let mut parent_index = usize::MAX;
-		
-		if parent != usize::MAX
-		{
-			parent_index = get_parent_index(nodes, index, parent);
-		}
-		
-		let mut level = -1;
-		
-		{
-			let ldes = nodes[index].descendants[0];
-			
-			if ldes != usize::MAX
-			{
-				level = nodes[ldes].level;
-			}
-		}
-		
-		rdes = nodes[index].descendants[1];
-		
-		if rdes != usize::MAX
-		{
-			let rlevel = nodes[rdes].level;
-			
-			if rlevel < level
-			{
-				level = rlevel;
-			}
-		}
-		else
-		{
-			level = -1;
-		}
-		
-		level += 1;
-		
-		if level < nodes[index].level
-		{
-			changes = CHANGE_PROPAGATION_DISTANCE;
-			
-			nodes[index].level = level;
-			
-			if rdes != usize::MAX && level < nodes[rdes].level
-			{
-				nodes[rdes].level = level;
-			}
-		}
-		
-		{
-			let new_index = skew(nodes, index);
-			
-			if new_index != index
-			{
-				index = new_index;
-				changes = CHANGE_PROPAGATION_DISTANCE;
-			}
-		}
-		{
-			let mut rdes = nodes[index].descendants[1];
-			
-			if rdes != usize::MAX
-			{
-				rdes = skew(nodes, rdes);
-				
-				if rdes != nodes[index].descendants[1]
-				{
-					nodes[index].descendants[1] = rdes;
-					changes = CHANGE_PROPAGATION_DISTANCE;
-				}
-				
-				let mut rrdes = nodes[rdes].descendants[1];
-				
-				if rrdes != usize::MAX
-				{
-					rrdes = skew(nodes, rrdes);
-					
-					if rrdes != nodes[rdes].descendants[1]
-					{
-						nodes[rdes].descendants[1] = rrdes;
-						changes = CHANGE_PROPAGATION_DISTANCE;
-					}
-				}
-			}
-		}
-		{
-			let new_index = split(nodes, index);
-			
-			if new_index != index
-			{
-				index = new_index;
-				changes = CHANGE_PROPAGATION_DISTANCE;
-			}
-		}
-		{
-			let mut rdes = nodes[index].descendants[1];
-			
-			if rdes != usize::MAX
-			{
-				rdes = split(nodes, rdes);
-				
-				if rdes != nodes[index].descendants[1]
-				{
-					nodes[index].descendants[1] = rdes;
-					changes = CHANGE_PROPAGATION_DISTANCE;
-				}
-			}
-		}
-		
-		if parent != usize::MAX
-		{
-			nodes[parent].descendants[parent_index] = index;
-		}
-		
-		if parent == usize::MAX || changes == 0
-		{
-			break;
-		}
-	}
-	
-	return if parent == usize::MAX {index} else {usize::MAX};
-}
-
-pub(super) fn find_successor<Nodes, Type>(nodes: &mut Nodes, mut index: usize) -> usize
-where
-	Nodes: ?Sized + std::ops::IndexMut<usize, Output = Node<Type>>
-{
-	if nodes[index].level == 0
-	{
-		return usize::MAX;
-	}
-	
-	index = nodes[index].descendants[1];
-	
-	while nodes[index].level > 0
-	{
-		index = nodes[index].descendants[0];
-	}
-	
-	return index;
-}
-
-pub(super) fn erase_rebalance<Nodes, Type>(nodes: &mut Nodes, index: usize) -> usize
-where
-	Nodes: ?Sized + std::ops::IndexMut<usize, Output = Node<Type>>
-{
-	let successor = find_successor(nodes, index);
-	
-	if successor != usize::MAX
-	{
-		swap_nodes(nodes, index, successor);
-	}
-	
-	return erase_rebalance_leaf(nodes, index);
-}

@@ -1,9 +1,10 @@
 use crate::svst::aa;
+use crate::svst::aa::node;
 
 #[derive(Debug)]
 pub struct SetEntry<KeyType>(KeyType);
 
-impl<KeyType> aa::node::Entry for SetEntry<KeyType>
+impl<KeyType> node::Entry for SetEntry<KeyType>
 {
 	type Key = KeyType;
 	type Value = KeyType;
@@ -24,7 +25,7 @@ impl<KeyType, Compare> Set<KeyType, Compare>
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		aa::node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0 != usize::MAX
+		node::AA::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0 != usize::MAX
 	}
 	
 	pub fn get<Key>(&self, key: &Key) -> Option<&KeyType>
@@ -56,7 +57,7 @@ impl<KeyType, Compare> Set<KeyType, Compare>
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		let index = aa::node::find(unsafe {self.repository.as_slice()}, self.root, value, &self.compare).0;
+		let index = node::AA::find(unsafe {self.repository.as_slice()}, self.root, value, &self.compare).0;
 		
 		if index != usize::MAX
 		{
@@ -75,9 +76,9 @@ impl<KeyType, Compare> Set<KeyType, Compare>
 		self.impl_retain(move |k| function(&k.0));
 	}
 	
-	pub fn iter<'t>(&'t self) -> aa::node::Iterator<&'t [aa::node::Node<SetEntry<KeyType>>]>
+	pub fn iter<'t>(&'t self) -> node::Iterator<&'t [node::Node<SetEntry<KeyType>>]>
 	{
-		aa::node::Iterator::<&'t [aa::node::Node<SetEntry<KeyType>>]>
+		node::Iterator::<&'t [node::Node<SetEntry<KeyType>>]>
 		{
 			first: self.first,
 			last: self.last,
@@ -92,13 +93,13 @@ impl<KeyType, Compare> Set<KeyType, Compare>
 	}
 }
 
-impl<'t, Type> std::iter::Iterator for aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>
+impl<'t, Type> std::iter::Iterator for node::Iterator<&'t [node::Node<SetEntry<Type>>]>
 {
 	type Item = &'t Type;
 	
 	fn next(&mut self) -> Option<Self::Item>
 	{
-		match aa::node::iter_impl!(self, 0)
+		match node::iter_impl!(self, 0)
 		{
 			usize::MAX => None,
 			i => Some(&self.nodes[i].as_ref().0),
@@ -106,11 +107,11 @@ impl<'t, Type> std::iter::Iterator for aa::node::Iterator<&'t [aa::node::Node<Se
 	}
 }
 
-impl<'t, Type> std::iter::DoubleEndedIterator for aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>
+impl<'t, Type> std::iter::DoubleEndedIterator for node::Iterator<&'t [node::Node<SetEntry<Type>>]>
 {
 	fn next_back(&mut self) -> Option<Self::Item>
 	{
-		match aa::node::iter_impl!(self, 1)
+		match node::iter_impl!(self, 1)
 		{
 			usize::MAX => None,
 			i => Some(&self.nodes[i].as_ref().0),
@@ -121,7 +122,7 @@ impl<'t, Type> std::iter::DoubleEndedIterator for aa::node::Iterator<&'t [aa::no
 impl<'t, Type> std::iter::IntoIterator for &'t Set<Type>
 {
 	type Item = &'t Type;
-	type IntoIter = aa::node::Iterator<&'t [aa::node::Node<SetEntry<Type>>]>;
+	type IntoIter = node::Iterator<&'t [node::Node<SetEntry<Type>>]>;
 	
 	fn into_iter(self) -> Self::IntoIter
 	{

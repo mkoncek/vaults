@@ -4,7 +4,7 @@ use crate::svst::aa::node;
 #[derive(Debug)]
 pub struct MapEntry<KeyType, MappedType>(KeyType, MappedType);
 
-impl<KeyType, MappedType> aa::node::Entry for MapEntry<KeyType, MappedType>
+impl<KeyType, MappedType> node::Entry for MapEntry<KeyType, MappedType>
 {
 	type Key = KeyType;
 	type Value = (KeyType, MappedType);
@@ -25,7 +25,7 @@ impl<KeyType, MappedType, Compare> Map<KeyType, MappedType, Compare>
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		aa::node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0 != usize::MAX
+		node::AA::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0 != usize::MAX
 	}
 	
 	pub fn get<Key>(&self, key: &Key) -> Option<&MappedType>
@@ -43,7 +43,7 @@ impl<KeyType, MappedType, Compare> Map<KeyType, MappedType, Compare>
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		let index = node::find(unsafe {self.repository.as_mut_slice()}, self.root, key, &self.compare).0;
+		let index = node::AA::find(unsafe {self.repository.as_mut_slice()}, self.root, key, &self.compare).0;
 		
 		if index != usize::MAX
 		{
@@ -84,7 +84,7 @@ impl<KeyType, MappedType, Compare> Map<KeyType, MappedType, Compare>
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		let index = aa::node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0;
+		let index = aa::node::AA::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0;
 		
 		if index != usize::MAX
 		{

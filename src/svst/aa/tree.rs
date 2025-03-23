@@ -72,7 +72,7 @@ impl<Type, Compare> Tree<Type, Compare>
 		}
 		
 		let mut values = unsafe {self.repository.as_mut_slice()};
-		let (mut position, parent, parent_index) = node::find(values, self.root, value.key(), &self.compare);
+		let (mut position, parent, parent_index) = node::AA::find(values, self.root, value.key(), &self.compare);
 		
 		if position != usize::MAX
 		{
@@ -82,10 +82,10 @@ impl<Type, Compare> Tree<Type, Compare>
 		position = self.repository.insert(node::Node::new(value));
 		values = unsafe {self.repository.as_mut_slice()};
 		
-		if node::insert_rebalance(values, parent, parent_index, position)
+		if node::AA::insert_rebalance(values, parent, parent_index, position)
 		{
-			self.root = node::skew(values, self.root);
-			self.root = node::split(values, self.root);
+			self.root = node::AA::skew(values, self.root);
+			self.root = node::AA::split(values, self.root);
 			values[self.root].parent = usize::MAX;
 		}
 		
@@ -142,7 +142,7 @@ impl<Type, Compare> Tree<Type, Compare>
 		let values = unsafe {self.repository.as_mut_slice()};
 		let parent = values[position].parent;
 		let rdes = values[position].descendants[1];
-		let new_root = node::erase_rebalance(values, position);
+		let new_root = node::AA::erase_rebalance(values, position);
 		
 		if new_root != usize::MAX
 		{
@@ -193,7 +193,7 @@ impl<Type, Compare> Tree<Type, Compare>
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>
 	{
-		let index = node::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0;
+		let index = node::AA::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0;
 		
 		if index != usize::MAX
 		{
