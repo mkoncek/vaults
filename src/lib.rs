@@ -20,7 +20,7 @@ impl Default for DefaultComparator
 }
 
 impl<Type> Comparator<Type> for DefaultComparator
-where Type: std::cmp::Ord
+where Type: ?Sized + std::cmp::Ord,
 {
 	fn compare(&self, lhs: &Type, rhs: &Type) -> std::cmp::Ordering
 	{

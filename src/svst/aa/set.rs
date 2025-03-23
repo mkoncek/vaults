@@ -12,52 +12,53 @@ impl<KeyType> node::Entry for SetEntry<KeyType>
 	fn value(self) -> Self::Value {self.0}
 }
 
-pub type Set<KeyType, Compare = crate::DefaultComparator> = aa::tree::Tree<SetEntry<KeyType>, Compare>;
+pub type Set<KeyType> = aa::tree::Tree<SetEntry<KeyType>>;
 
-impl<KeyType, Compare> Set<KeyType, Compare>
+impl<KeyType> Set<KeyType>
 {
 	pub fn first(&self) -> Option<&KeyType> {self.impl_first().map(|k| &k.0)}
 	pub fn last(&self) -> Option<&KeyType> {self.impl_last().map(|k| &k.0)}
 	
-	pub fn contains<Key>(&self, key: &Key) -> bool
+	pub unsafe fn contains_with_comparator<Key, Compare>(&self, key: &Key, compare: Compare) -> bool
 	where
 		KeyType: std::borrow::Borrow<Key>,
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		node::AA::find(unsafe {self.repository.as_slice()}, self.root, key, &self.compare).0 != usize::MAX
+		node::AA::find(unsafe {self.repository.as_slice()}, self.root, key, compare).0 != usize::MAX
 	}
 	
-	pub fn get<Key>(&self, key: &Key) -> Option<&KeyType>
+	pub unsafe fn get_with_comparator<Key, Compare>(&self, key: &Key, compare: Compare) -> Option<&KeyType>
 	where
 		KeyType: std::borrow::Borrow<Key>,
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		self.impl_get(key).map(|k| &k.0)
+		self.impl_get(key, compare).map(|k| &k.0)
 	}
 	
-	pub fn insert(&mut self, value: KeyType) -> bool
+	pub unsafe fn insert_with_comparator<Compare>(&mut self, value: KeyType, compare: Compare) -> bool
 	where
 		Compare: crate::Comparator<KeyType>,
 	{
-		self.try_insert(SetEntry {0: value}, |v| v.is_none())
+		self.try_insert(SetEntry {0: value}, compare, |v| v.is_none())
 	}
 	
-	pub fn replace(&mut self, value: KeyType) -> Option<KeyType>
+	pub unsafe fn replace_with_comparator<Compare>(&mut self, value: KeyType, compare: Compare) -> Option<KeyType>
 	where
+		KeyType: std::cmp::Ord,
 		Compare: crate::Comparator<KeyType>,
 	{
-		self.try_insert(SetEntry {0: value}, |v| v.map(|v| v.0))
+		self.try_insert(SetEntry {0: value}, compare, |v| v.map(|v| v.0))
 	}
 	
-	pub fn remove<Key>(&mut self, value: &Key) -> bool
+	pub unsafe fn remove_with_comparator<Key, Compare>(&mut self, value: &Key, compare: Compare) -> bool
 	where
 		KeyType: std::borrow::Borrow<Key>,
 		Key: ?Sized,
 		Compare: crate::Comparator<Key>,
 	{
-		let index = node::AA::find(unsafe {self.repository.as_slice()}, self.root, value, &self.compare).0;
+		let index = node::AA::find(unsafe {self.repository.as_slice()}, self.root, value, compare).0;
 		
 		if index != usize::MAX
 		{
@@ -70,7 +71,6 @@ impl<KeyType, Compare> Set<KeyType, Compare>
 	
 	pub fn retain<Function>(&mut self, mut function: Function)
 	where
-		KeyType: std::cmp::Ord,
 		Function: std::ops::FnMut(&KeyType) -> bool,
 	{
 		self.impl_retain(move |k| function(&k.0));
@@ -85,6 +85,44 @@ impl<KeyType, Compare> Set<KeyType, Compare>
 			bounds: [self.first, self.last],
 			nodes: unsafe {self.repository.as_slice()},
 		}
+	}
+	
+	pub fn contains<Key>(&self, key: &Key) -> bool
+	where
+		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
+		Key: ?Sized + std::cmp::Ord,
+	{
+		unsafe {self.contains_with_comparator(key, crate::DefaultComparator::new())}
+	}
+	
+	pub fn get<Key>(&self, key: &Key) -> Option<&KeyType>
+	where
+		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
+		Key: ?Sized + std::cmp::Ord,
+	{
+		unsafe {self.get_with_comparator(key, crate::DefaultComparator::new())}
+	}
+	
+	pub fn insert(&mut self, value: KeyType) -> bool
+	where
+		KeyType: std::cmp::Ord,
+	{
+		unsafe {self.insert_with_comparator(value, crate::DefaultComparator::new())}
+	}
+	
+	pub fn replace(&mut self, value: KeyType) -> Option<KeyType>
+	where
+		KeyType: std::cmp::Ord,
+	{
+		unsafe {self.replace_with_comparator(value, crate::DefaultComparator::new())}
+	}
+	
+	pub fn remove<Key>(&mut self, value: &Key) -> bool
+	where
+		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
+		Key: ?Sized + std::cmp::Ord,
+	{
+		unsafe {self.remove_with_comparator(value, crate::DefaultComparator::new())}
 	}
 	
 	pub unsafe fn get_at_unchecked(&self, position: usize) -> &KeyType
