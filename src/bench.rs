@@ -115,7 +115,7 @@ fn bench_set_insert(times: usize, limit: usize)
 fn bench_set_clear_insert(times: usize, limit: usize)
 {
 	let mut s = AATreeSet::new();
-	println!("insertion of {} elements ({} times)", limit, times);
+	println!("insertion of {} elements with clear ({} times)", limit, times);
 	println!("        AATreeSet: {: >10.2?}", repeat(times, ||
 	{
 		s.clear();

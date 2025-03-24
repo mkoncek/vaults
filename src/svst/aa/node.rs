@@ -47,11 +47,11 @@ pub(super) trait AA<Type>:
 	std::ops::Index<usize, Output = Node<Type>> +
 	std::ops::IndexMut<usize, Output = Node<Type>> +
 {
-	fn get_parent_index(&self, index: usize, parent: usize) -> usize
+	fn get_parent_index(&self, index: usize, parent: usize) -> u8
 	{
 		for i in 0 .. 2
 		{
-			if self[parent].descendants[i] == index
+			if self[parent].descendants[i as usize] == index
 			{
 				return i;
 			}
@@ -119,7 +119,7 @@ pub(super) trait AA<Type>:
 		return index;
 	}
 	
-	fn find<Key, Compare>(&self, root: usize, key: &Key, comapre: Compare) -> (usize, usize, usize)
+	fn find<Key, Compare>(&self, root: usize, key: &Key, comapre: Compare) -> (usize, usize, u8)
 	where
 		Type: Entry,
 		Type::Key: std::borrow::Borrow<Key>,
@@ -128,7 +128,7 @@ pub(super) trait AA<Type>:
 	{
 		let mut desc = root;
 		let mut parent = usize::MAX;
-		let mut parent_index: usize = 0;
+		let mut parent_index: u8 = 0;
 		
 		while desc != usize::MAX
 		{
@@ -187,7 +187,7 @@ pub(super) trait AA<Type>:
 		if parent != usize::MAX
 		{
 			let parent_index = self.get_parent_index(index, parent);
-			self[parent].descendants[parent_index] = successor;
+			self[parent].descendants[parent_index as usize] = successor;
 		}
 		
 		let index_ldes = self[index].descendants[0];
@@ -217,10 +217,10 @@ pub(super) trait AA<Type>:
 	const CHANGE_PROPAGATION_DISTANCE: i32 = 3;
 	
 	fn insert_rebalance(&mut self, mut parent: usize,
-		mut parent_index: usize, mut index: usize) -> bool
+		mut parent_index: u8, mut index: usize) -> bool
 	{
 		self[index].parent = parent;
-		self[parent].descendants[parent_index] = index;
+		self[parent].descendants[parent_index as usize] = index;
 		
 		let mut changes = Self::CHANGE_PROPAGATION_DISTANCE;
 		
@@ -249,7 +249,7 @@ pub(super) trait AA<Type>:
 			}
 			
 			self[index].parent = parent;
-			self[parent].descendants[parent_index] = index;
+			self[parent].descendants[parent_index as usize] = index;
 		}
 		
 		return changes > 0;
@@ -277,7 +277,7 @@ pub(super) trait AA<Type>:
 		
 		{
 			let parent_index = self.get_parent_index(index, parent);
-			self[parent].descendants[parent_index] = rdes;
+			self[parent].descendants[parent_index as usize] = rdes;
 		}
 		
 		let mut changes = Self::CHANGE_PROPAGATION_DISTANCE;
@@ -287,7 +287,7 @@ pub(super) trait AA<Type>:
 			changes -= 1;
 			index = parent;
 			parent = self[parent].parent;
-			let mut parent_index = usize::MAX;
+			let mut parent_index = 0;
 			
 			if parent != usize::MAX
 			{
@@ -397,7 +397,7 @@ pub(super) trait AA<Type>:
 			
 			if parent != usize::MAX
 			{
-				self[parent].descendants[parent_index] = index;
+				self[parent].descendants[parent_index as usize] = index;
 			}
 			
 			if parent == usize::MAX || changes == 0
