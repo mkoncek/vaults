@@ -11,3 +11,5 @@ mod bit_indexing;
 pub type SVec<Type, const SIZE: usize> = svec::SVec<Type, SIZE>;
 pub type AATreeSet<KeyType> = aa::Set<KeyType>;
 pub type AATreeMap<KeyType, MappedType> = aa::Map<KeyType, MappedType>;
+pub type AAVecSet<KeyType> = aa::VecSet<KeyType>;
+pub type AAVecMap<KeyType, MappedType> = aa::VecMap<KeyType, MappedType>;

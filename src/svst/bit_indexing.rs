@@ -50,7 +50,7 @@ fn test_index_iterator()
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct TransientIndexSliceIterator
+pub struct TransientIndexSliceIterator
 {
 	it: IndexIterator,
 	pos: usize,
@@ -67,7 +67,7 @@ impl TransientIndexSliceIterator
 		}
 	}
 	
-	pub(super) fn next(&mut self, bitset: &[IndexType]) -> Option<usize>
+	pub fn next(&mut self, bitset: &[IndexType]) -> Option<usize>
 	{
 		if self.pos == bitset.len()
 		{

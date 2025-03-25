@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 pub trait Entry
 {
 	type Key;
@@ -43,9 +41,7 @@ impl<Type> Node<Type>
 	pub fn value(self) -> Type {self.value}
 }
 
-pub(super) trait AA<Type>:
-	std::ops::Index<usize, Output = Node<Type>> +
-	std::ops::IndexMut<usize, Output = Node<Type>> +
+pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 {
 	fn get_parent_index(&self, index: usize, parent: usize) -> u8
 	{
@@ -61,6 +57,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn skew(&mut self, index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		let l_index = self[index].descendants[0];
 		
@@ -90,6 +88,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn split(&mut self, index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		let r_index = self[index].descendants[1];
 		
@@ -122,9 +122,8 @@ pub(super) trait AA<Type>:
 	fn find<Key, Compare>(&self, root: usize, key: &Key, comapre: Compare) -> (usize, usize, u8)
 	where
 		Type: Entry,
-		Type::Key: std::borrow::Borrow<Key>,
 		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: Fn(&Key, &Type::Key) -> std::cmp::Ordering,
 	{
 		let mut desc = root;
 		let mut parent = usize::MAX;
@@ -134,7 +133,7 @@ pub(super) trait AA<Type>:
 		{
 			parent = desc;
 			
-			match comapre.compare(key, self[desc].value.key().borrow())
+			match comapre(key, self[desc].value.key())
 			{
 				std::cmp::Ordering::Less =>
 				{
@@ -157,6 +156,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn swap_nodes(&mut self, index: usize, successor: usize)
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		if index == successor
 		{
@@ -218,6 +219,8 @@ pub(super) trait AA<Type>:
 	
 	fn insert_rebalance(&mut self, mut parent: usize,
 		mut parent_index: u8, mut index: usize) -> bool
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		self[index].parent = parent;
 		self[parent].descendants[parent_index as usize] = index;
@@ -256,6 +259,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn erase_rebalance_leaf(&mut self, mut index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		if self[index].level != 0
 		{
@@ -427,6 +432,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn erase_rebalance(&mut self, index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		let successor = self.find_successor(index);
 		
@@ -437,14 +444,80 @@ pub(super) trait AA<Type>:
 		
 		return self.erase_rebalance_leaf(index);
 	}
+	
+	/// Updates the links pointing to a node which was moved from `from` to `to`.
+	fn relocate(&mut self, from: usize, to: usize)
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+	{
+		let parent = self[to].parent;
+		
+		if parent != usize::MAX
+		{
+			let parent_index = self.get_parent_index(from, parent);
+			self[parent].descendants[parent_index as usize] = to;
+		}
+		
+		for i in 0 .. 2
+		{
+			let des = self[to].descendants[i];
+			
+			if des != usize::MAX
+			{
+				self[des].parent = to;
+			}
+		}
+	}
 }
 
 impl<Indexable, Type> AA<Type> for Indexable
 where
 	Indexable: ?Sized,
 	Indexable: std::ops::Index<usize, Output = Node<Type>>,
-	Indexable: std::ops::IndexMut<usize, Output = Node<Type>>,
 {
+}
+
+/// Checks the AA tree invariants of the subtree, returns the number of its nodes.
+#[cfg(test)]
+pub(super) fn check_invariants<Type>(nodes: &[Node<Type>], root: usize) -> usize
+{
+	if root != usize::MAX
+	{
+		assert_eq!(usize::MAX, nodes[root].parent);
+	}
+	
+	return check_subtree(nodes, root);
+}
+
+#[cfg(test)]
+fn check_subtree<Type>(nodes: &[Node<Type>], index: usize) -> usize
+{
+	if index == usize::MAX
+	{
+		return 0;
+	}
+	
+	let level = |i: usize| if i == usize::MAX {-1} else {nodes[i].level};
+	let node = &nodes[index];
+	let [ldes, rdes] = node.descendants;
+	
+	for des in [ldes, rdes]
+	{
+		if des != usize::MAX
+		{
+			assert_eq!(index, nodes[des].parent);
+		}
+	}
+	
+	assert_eq!(node.level - 1, level(ldes), "left child level of {}", index);
+	assert!(level(rdes) == node.level || level(rdes) == node.level - 1, "right child level of {}", index);
+	
+	if rdes != usize::MAX
+	{
+		assert!(level(nodes[rdes].descendants[1]) < node.level, "right grandchild level of {}", index);
+	}
+	
+	return 1 + check_subtree(nodes, ldes) + check_subtree(nodes, rdes);
 }
 
 pub struct Iterator<Nodes: ?Sized>
