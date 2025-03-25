@@ -1,5 +1,6 @@
 use vaults::svst::Repository;
 use vaults::svst::AATreeSet;
+use vaults::svst::AAVecSet;
 
 // static PRIME: usize = 18_446_744_073_709_551_557;
 static PRIME: usize = 281_474_976_710_597;
@@ -94,6 +95,14 @@ fn bench_set_insert(times: usize, limit: usize)
 			s.insert(j);
 		}
 	}));
+	println!("        AAVecSet:  {: >10.2?}", repeat(times, ||
+	{
+		let mut s = AAVecSet::new();
+		for j in 0 .. limit
+		{
+			s.insert(j);
+		}
+	}));
 	println!("        BTreeSet:  {: >10.2?}", repeat(times, ||
 	{
 		let mut s = std::collections::BTreeSet::new();
@@ -124,6 +133,15 @@ fn bench_set_clear_insert(times: usize, limit: usize)
 			s.insert(j);
 		}
 	}));
+	let mut s = AAVecSet::new();
+	println!("        AAVecSet:  {: >10.2?}", repeat(times, ||
+	{
+		s.clear();
+		for j in 0 .. limit
+		{
+			s.insert(j);
+		}
+	}));
 	let mut s = std::collections::BTreeSet::new();
 	println!("        BTreeSet:  {: >10.2?}", repeat(times, ||
 	{
@@ -144,6 +162,36 @@ fn bench_set_clear_insert(times: usize, limit: usize)
 	}));
 }
 
+fn bench_set_remove(times: usize, limit: usize)
+{
+	let removed = (0 .. limit).map(|i| i * PRIME % limit).collect::<Vec<_>>();
+	println!("removal of {} elements in pseudo-random order ({} times)", limit, times);
+	let mut d = std::time::Duration::new(0, 0);
+	for _ in 0 .. times
+	{
+		let mut s = AATreeSet::new();
+		for j in 0 .. limit {s.insert(j);}
+		d = d.saturating_add(timed(|| for j in &removed {s.remove(j);}));
+	}
+	println!("        AATreeSet: {: >10.2?}", d);
+	let mut d = std::time::Duration::new(0, 0);
+	for _ in 0 .. times
+	{
+		let mut s = AAVecSet::new();
+		for j in 0 .. limit {s.insert(j);}
+		d = d.saturating_add(timed(|| for j in &removed {s.remove(j);}));
+	}
+	println!("        AAVecSet:  {: >10.2?}", d);
+	let mut d = std::time::Duration::new(0, 0);
+	for _ in 0 .. times
+	{
+		let mut s = std::collections::BTreeSet::new();
+		for j in 0 .. limit {s.insert(j);}
+		d = d.saturating_add(timed(|| for j in &removed {s.remove(j);}));
+	}
+	println!("        BTreeSet:  {: >10.2?}", d);
+}
+
 fn main()
 {
 	println!("Size of AASet (default): {} bytes", std::mem::size_of::<AATreeSet<i32>>());
@@ -160,4 +208,7 @@ fn main()
 	
 	bench_set_insert(1_000, 10_000);
 	bench_set_clear_insert(1_000, 10_000);
+	
+	bench_set_remove(1_000, 1_000);
+	bench_set_remove(1_000, 10_000);
 }

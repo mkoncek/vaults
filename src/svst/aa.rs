@@ -7,3 +7,5 @@ mod map;
 
 pub use set::Set;
 pub use map::Map;
+pub use set::VecSet;
+pub use map::VecMap;
