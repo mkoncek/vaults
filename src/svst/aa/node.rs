@@ -43,9 +43,7 @@ impl<Type> Node<Type>
 	pub fn value(self) -> Type {self.value}
 }
 
-pub(super) trait AA<Type>:
-	std::ops::Index<usize, Output = Node<Type>> +
-	std::ops::IndexMut<usize, Output = Node<Type>> +
+pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 {
 	fn get_parent_index(&self, index: usize, parent: usize) -> u8
 	{
@@ -61,6 +59,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn skew(&mut self, index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		let l_index = self[index].descendants[0];
 		
@@ -90,6 +90,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn split(&mut self, index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		let r_index = self[index].descendants[1];
 		
@@ -122,9 +124,8 @@ pub(super) trait AA<Type>:
 	fn find<Key, Compare>(&self, root: usize, key: &Key, comapre: Compare) -> (usize, usize, u8)
 	where
 		Type: Entry,
-		Type::Key: std::borrow::Borrow<Key>,
 		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: Fn(&Key, &Type::Key) -> std::cmp::Ordering,
 	{
 		let mut desc = root;
 		let mut parent = usize::MAX;
@@ -134,7 +135,7 @@ pub(super) trait AA<Type>:
 		{
 			parent = desc;
 			
-			match comapre.compare(key, self[desc].value.key().borrow())
+			match comapre(key, self[desc].value.key())
 			{
 				std::cmp::Ordering::Less =>
 				{
@@ -157,6 +158,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn swap_nodes(&mut self, index: usize, successor: usize)
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		if index == successor
 		{
@@ -218,6 +221,8 @@ pub(super) trait AA<Type>:
 	
 	fn insert_rebalance(&mut self, mut parent: usize,
 		mut parent_index: u8, mut index: usize) -> bool
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		self[index].parent = parent;
 		self[parent].descendants[parent_index as usize] = index;
@@ -256,6 +261,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn erase_rebalance_leaf(&mut self, mut index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		if self[index].level != 0
 		{
@@ -427,6 +434,8 @@ pub(super) trait AA<Type>:
 	}
 	
 	fn erase_rebalance(&mut self, index: usize) -> usize
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
 	{
 		let successor = self.find_successor(index);
 		
@@ -437,13 +446,34 @@ pub(super) trait AA<Type>:
 		
 		return self.erase_rebalance_leaf(index);
 	}
+	
+	fn swap_positions(&mut self, removed: usize, last: usize)
+	where
+		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+	{
+		if removed == last
+		{
+			unreachable!();
+		}
+		
+		let removed_parent = self[removed].parent;
+		let last_parent_index = self.get_parent_index(last, self[last].parent);
+		self[removed_parent].descendants[last_parent_index as usize] = removed;
+		
+		for i in 0 .. 2
+		{
+			let des = self[last].descendants[i];
+			self[des].parent = removed;
+		}
+		
+		unsafe {std::ptr::swap(std::ptr::from_mut(&mut self[removed]), std::ptr::from_mut(&mut self[last]))};
+	}
 }
 
 impl<Indexable, Type> AA<Type> for Indexable
 where
 	Indexable: ?Sized,
 	Indexable: std::ops::Index<usize, Output = Node<Type>>,
-	Indexable: std::ops::IndexMut<usize, Output = Node<Type>>,
 {
 }
 

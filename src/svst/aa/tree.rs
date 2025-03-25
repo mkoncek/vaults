@@ -10,6 +10,182 @@ pub struct Tree<Type>
 	pub(super) repository: Repository<node::Node<Type>>,
 }
 
+pub trait TreeStorage<Type>: std::ops::Index<usize, Output = node::Node<Type>>
+{
+	fn push(&mut self, value: node::Node<Type>) -> usize;
+	fn remove(&mut self, index: usize) -> Option<node::Node<Type>>;
+}
+
+impl<Type> TreeStorage<Type> for Repository<node::Node<Type>>
+{
+	fn push(&mut self, value: node::Node<Type>) -> usize
+	{
+		self.insert(value)
+	}
+	
+	fn remove(&mut self, index: usize) -> Option<node::Node<Type>>
+	{
+		self.remove(index)
+	}
+}
+
+#[derive(Debug)]
+pub struct TreeBase
+{
+	pub root: usize,
+	pub first: usize,
+	pub last: usize,
+}
+
+pub trait VTree<Type>
+where
+	Self: std::ops::Deref<Target = TreeBase> + std::ops::DerefMut,
+	Type: node::Entry,
+{
+	fn is_empty(&self) -> bool;
+	
+	fn compare<Key: ?Sized>(&self, lhs: &Key, rhs: &Type::Key) -> std::cmp::Ordering;
+	fn get_compare<Key: ?Sized>(&self) -> impl Fn(&Key, &Type::Key) -> std::cmp::Ordering
+	{
+		|lhs: &Key, rhs: &Type::Key| self.compare(lhs, rhs)
+	}
+	
+	fn get<'t, Key, Storage>(&self, storage: &'t Storage, key: &Key) -> Option<&'t Type>
+	where
+		Type: node::Entry,
+		Key: ?Sized,
+		Storage: TreeStorage<Type>,
+	{
+		let index = node::AA::find(storage, self.root, key, self.get_compare::<Key>()).0;
+		
+		if index != usize::MAX
+		{
+			return Some(&storage[index].as_ref());
+		}
+		
+		return None;
+	}
+	
+	fn try_insert<Consumer, ResultType, Storage>(&mut self, storage: &mut Storage, value: Type, consumer: Consumer) -> ResultType
+	where
+		Type: node::Entry,
+		Consumer: std::ops::FnOnce(Option<Type>) -> ResultType,
+		Storage: TreeStorage<Type>,
+		Storage: std::ops::IndexMut<usize>,
+	{
+		if self.is_empty()
+		{
+			self.root = storage.push(node::Node::new(value));
+			self.first = self.root;
+			self.last = self.root;
+			return consumer(None);
+		}
+		
+		let (mut position, parent, parent_index) = node::AA::find(storage, self.root, value.key(), self.get_compare::<Type::Key>());
+		
+		if position != usize::MAX
+		{
+			return consumer(Some(std::mem::replace(&mut storage[position].as_mut(), value)));
+		}
+		
+		position = storage.push(node::Node::new(value));
+		
+		if node::AA::insert_rebalance(storage, parent, parent_index, position)
+		{
+			self.root = node::AA::skew(storage, self.root);
+			self.root = node::AA::split(storage, self.root);
+			storage[self.root].parent = usize::MAX;
+		}
+		
+		if storage[self.first].descendants[0] == position || storage[position].descendants[1] == self.first
+		{
+			self.first = position;
+		}
+		
+		if storage[position].parent == self.last
+		{
+			self.last = position;
+		}
+		
+		return consumer(None);
+	}
+	
+	fn remove_at<Storage>(&mut self, storage: &mut Storage, position: usize) -> Option<Type::Value>
+	where
+		Type: node::Entry,
+		Storage: TreeStorage<Type>,
+		Storage: std::ops::IndexMut<usize>,
+	{
+		let Some(result) = storage.remove(position) else
+		{
+			return None;
+		};
+		let parent = storage[position].parent;
+		let rdes = storage[position].descendants[1];
+		let new_root = node::AA::erase_rebalance(storage, position);
+		
+		if new_root != usize::MAX
+		{
+			self.root = new_root;
+		}
+		else if self.is_empty()
+		{
+			self.root = usize::MAX;
+		}
+		
+		if position == self.first
+		{
+			if rdes != usize::MAX
+			{
+				self.first = rdes;
+			}
+			else
+			{
+				self.first = parent;
+			}
+		}
+		
+		if position == self.last
+		{
+			self.last = parent;
+		}
+		
+		return Some(result.value().value());
+	}
+	
+	fn pop_first<Storage>(&mut self, storage: &mut Storage) -> Option<Type::Value>
+	where
+		Type: node::Entry,
+		Storage: TreeStorage<Type>,
+		Storage: std::ops::IndexMut<usize>,
+	{
+		if self.first != usize::MAX
+		{
+			self.remove_at(storage, self.first)
+		}
+		else
+		{
+			None
+		}
+	}
+	
+	fn pop_last<Storage>(&mut self, storage: &mut Storage) -> Option<Type::Value>
+	where
+		Type: node::Entry,
+		Storage: TreeStorage<Type>,
+		Storage: std::ops::IndexMut<usize>,
+	{
+		if self.last != usize::MAX
+		{
+			self.remove_at(storage, self.last)
+		}
+		else
+		{
+			None
+		}
+	}
+}
+
 impl<Type> Tree<Type>
 {
 	pub const fn new() -> Self
@@ -116,7 +292,8 @@ impl<Type> Tree<Type>
 	}
 	
 	pub fn remove_at(&mut self, position: usize) -> Option<Type::Value>
-	where Type: node::Entry
+	where
+		Type: node::Entry,
 	{
 		let Some(result) = self.repository.remove(position) else
 		{
