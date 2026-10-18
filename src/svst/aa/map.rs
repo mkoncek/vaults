@@ -65,7 +65,7 @@ where
 	where
 		Compare: FnMut(&KeyType, &KeyType) -> std::cmp::Ordering,
 	{
-		self.try_insert(MapEntry {0: key, 1: mapped}, compare, |v| v.map(|v| v.1))
+		self.try_insert(MapEntry {0: key, 1: mapped}, compare, |existing| existing.map(|(existing, value)| std::mem::replace(&mut existing.1, value.1)))
 	}
 	
 	pub fn contains_key<Key>(&self, key: &Key) -> bool
@@ -100,6 +100,8 @@ where
 		self.get_key_value_by(|k| k.borrow().cmp(key))
 	}
 	
+	/// Inserts a key-value pair into the map.
+	/// If the map already contains an equal key, only its value is updated and the old value is returned.
 	pub fn insert(&mut self, key: KeyType, mapped: MappedType) -> Option<MappedType>
 	where
 		KeyType: std::cmp::Ord,
@@ -220,4 +222,16 @@ fn test_aa_vec_map()
 	assert_eq!(None, map.remove("c"));
 	assert_eq!(Some((&"b".to_owned(), &20)), map.first_key_value());
 	assert_eq!(1, map.len());
+}
+
+#[test]
+fn test_aa_map_insert_keeps_key()
+{
+	// Keys equal by the ordering but distinguishable, only the value is updated
+	let by_lowercase = |lhs: &String, rhs: &String| lhs.to_lowercase().cmp(&rhs.to_lowercase());
+	let mut map = Map::<String, i32>::new();
+	assert_eq!(None, map.insert_by("Key".to_owned(), 1, by_lowercase));
+	assert_eq!(Some(1), map.insert_by("KEY".to_owned(), 2, by_lowercase));
+	assert_eq!(1, map.len());
+	assert_eq!(Some((&"Key".to_owned(), &2)), map.first_key_value());
 }
