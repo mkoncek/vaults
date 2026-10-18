@@ -330,215 +330,84 @@ fn test_erase()
 	}
 }
 
-/*
-const fn max_levels() -> usize
+/// The number of words of the level `level` of the index, where level 0 holds the bits of the values,
+/// i.e. `level_length` applied `level + 1` times to `size`.
+const fn level_length_at(size: usize, level: u32) -> usize
 {
-	let mut result = 1;
-	let mut level = usize::MAX - IndexType::BITS as usize;
-	while level != 1
+	let shift = IndexType::BITS.trailing_zeros() * (level + 1);
+	
+	if shift >= usize::BITS
 	{
-		level = level_length(level);
-		result += 1;
+		return (size != 0) as usize;
 	}
-	return result;
-}
-*/
-
-#[derive(Debug, Clone, Copy)]
-struct Levels
-{
-	bitfield: u128,
-	pub len: u8,
+	
+	return (size >> shift) + (size & ((1 << shift) - 1) != 0) as usize;
 }
 
-impl From<usize> for Levels
+/// The number of levels of the index below its single top word.
+const fn depth(size: usize) -> u32
 {
-	fn from(value: usize) -> Self
-	{
-		let mut result = Self {bitfield: 0, len: 0};
-		let mut size = level_length(value);
-		let mut shift: u8 = 64;
-		
-		while size != 1
-		{
-			result.len += 1;
-			size = level_length(size);
-			result.bitfield |= (size as u128) << shift;
-			
-			shift /= 2;
-		}
-		
-		assert_ne!(0, shift);
-		
-		shift *= 2;
-		
-		while shift <= 64
-		{
-			let mut addition = (result.bitfield >> (shift / 2)) & ((1 << (shift / 2)) - 1);
-			addition <<= shift;
-			result.bitfield += addition;
-			shift *= 2;
-		}
-		
-		return result;
-	}
-}
-
-impl Levels
-{
-	pub fn at(&self, index: u8) -> usize
-	{
-		assert!(index < self.len.max(1), "index is {} but len is {}", index, self.len);
-		let shift = 64 / (1 << index);
-		return ((self.bitfield >> shift) & ((1 << shift) - 1)) as usize;
-	}
+	let bits = usize::BITS - size.saturating_sub(1).leading_zeros();
+	let bits_per_level = IndexType::BITS.trailing_zeros();
+	return (bits + bits_per_level - 1) / bits_per_level - (bits != 0) as u32;
 }
 
 #[test]
-fn test_levels()
+fn test_level_length_at()
 {
-	/*
-	println!("{:b}", Levels::from(0).bitfield);
-	println!("{:b}", Levels::from(1).bitfield);
-	println!("{:b}", Levels::from(2).bitfield);
-	println!("{:b}", Levels::from(3).bitfield);
-	println!("{:b}", Levels::from(4).bitfield);
-	println!("{:b}", Levels::from(127).bitfield);
-	println!("{:b}", Levels::from(128).bitfield);
-	println!("{:b}", Levels::from(129).bitfield);
-	
-	
-	assert_eq!(0, Levels::from(0).bitfield);
-	assert_eq!(IndexType::BITS as usize + 0, Levels::from(1).bitfield);
-	assert_eq!(IndexType::BITS as usize + 1, Levels::from(2).bitfield);
-	assert_eq!(IndexType::BITS as usize + IndexType::BITS as usize, Levels::from(IndexType::BITS as usize).bitfield);
-	*/
-}
-
-#[test]
-fn test_levels_offsets()
-{
-	for size in [1, 127, 128, 129, 128 * 128, 128 * 128 + 1, 795_566, 1_988_923, 128 * 128 * 128 + 1, u32::MAX as usize]
+	for size in [0, 1, 2, 127, 128, 129, 128 * 128, 128 * 128 + 1, 795_566, 1_988_923, u32::MAX as usize, 1 << 43, (1 << 49) + 1, usize::MAX - IndexType::BITS as usize + 1]
 	{
-		let mut lengths = vec![level_length(size)];
-		while *lengths.last().unwrap() > 1
+		let mut length = level_length(size);
+		let mut level = 0;
+		
+		while length > 1
 		{
-			lengths.push(level_length(*lengths.last().unwrap()));
+			assert_eq!(length, level_length_at(size, level), "size {}, level {}", size, level);
+			length = level_length(length);
+			level += 1;
 		}
 		
-		let levels = Levels::from(size);
-		assert_eq!(lengths.len() - 1, levels.len as usize, "size {}", size);
+		assert_eq!(length, level_length_at(size, level), "size {}, level {}", size, level);
+		assert_eq!(level, depth(size), "size {}", size);
 		
-		for i in 0 .. levels.len
+		if size > 1
 		{
-			assert_eq!(lengths[i as usize + 1 ..].iter().sum::<usize>(), levels.at(i), "size {}, level {}", size, i);
+			assert_eq!(index_length(size), (0 ..= level).map(|level| level_length_at(size, level)).sum::<usize>(), "size {}", size);
 		}
 	}
 }
 
-pub fn _push_front(index_span: &mut [IndexType], size: usize) -> usize
-{
-	let mut sizes = [0_usize; 6];
-	let mut sizes_len: usize = 0;
-	
-	{
-		let mut size = level_length(size);
-		
-		for i in 0 .. sizes.len()
-		{
-			if size == 1
-			{
-				break;
-			}
-			
-			sizes_len += 1;
-			size = level_length(size);
-			sizes[i] = size;
-		}
-		
-		for i in (0 .. sizes_len.saturating_sub(1)).rev()
-		{
-			sizes[i] += sizes[i + 1];
-		}
-	}
-	
-	let mut position = 0;
-	
-	if sizes_len > 0
-	{
-		position = index_span[0].trailing_ones() as usize;
-		
-		for i in (1 .. sizes_len).rev()
-		{
-			position = position * IndexType::BITS as usize + index_span[sizes[i] + position].trailing_ones() as usize;
-		}
-	}
-	
-	let result = position * IndexType::BITS as usize + index_span[sizes[0] + position].trailing_ones() as usize;
-	
-	index_span[sizes[0] + position] |= 1 << (result % IndexType::BITS as usize);
-	
-	for i in 0 .. sizes.len()
-	{
-		if ! index_span[sizes[i] + position] != 0
-		{
-			break;
-		}
-		
-		let modulus = position % IndexType::BITS as usize;
-		position /= IndexType::BITS as usize;
-		let offset = if i + 1 == sizes.len()
-		{
-			0
-		}
-		else
-		{
-			sizes[i + 1]
-		};
-		
-		index_span[offset + position] |= 1 << modulus;
-	}
-	
-	return result;
-}
-
+/// Marks the lowest index which is not present, returns that index.
+/// There must be such index lower than `size`.
 pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
 {
-	let levels = Levels::from(size);
+	let depth = depth(size);
+	
+	// The offset of the current level and the position of the current word within it, starting at the top word
+	let mut offset = 0;
 	let mut position = 0;
 	
-	if levels.len > 0
+	for level in (0 .. depth).rev()
 	{
-		position = index_span[0].trailing_ones() as usize;
-		
-		for i in (1 .. levels.len).rev()
-		{
-			position = position * IndexType::BITS as usize + index_span[levels.at(i) + position].trailing_ones() as usize;
-		}
+		position = position * IndexType::BITS as usize + index_span[offset + position].trailing_ones() as usize;
+		offset += level_length_at(size, level + 1);
 	}
 	
-	let result = position * IndexType::BITS as usize + index_span[levels.at(0) + position].trailing_ones() as usize;
+	let result = position * IndexType::BITS as usize + index_span[offset + position].trailing_ones() as usize;
 	
-	index_span[levels.at(0) + position] |= 1 << (result % IndexType::BITS as usize);
+	index_span[offset + position] |= 1 << (result % IndexType::BITS as usize);
 	
-	for i in 0 .. levels.len
+	// Mark the full words in the levels above
+	for level in 0 .. depth
 	{
-		if ! index_span[levels.at(i) + position] != 0
+		if ! index_span[offset + position] != 0
 		{
 			break;
 		}
 		
 		let modulus = position % IndexType::BITS as usize;
 		position /= IndexType::BITS as usize;
-		let offset = if i + 1 == levels.len
-		{
-			0
-		}
-		else
-		{
-			levels.at(i + 1)
-		};
-		
+		offset -= level_length_at(size, level + 1);
 		index_span[offset + position] |= 1 << modulus;
 	}
 	
