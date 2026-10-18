@@ -207,13 +207,16 @@ impl TreeBase
 		}
 	}
 	
+	/// Inserts `value` unless there already is an equal one.
+	/// `consumer` receives the existing value together with `value` if there is one, or `None` if `value` was inserted.
+	/// 
 	/// `compare` returns the ordering of its first argument relative to the second one.
 	pub fn try_insert<Type, Storage, Compare, Consumer, ResultType>(&mut self, storage: &mut Storage, value: Type, mut compare: Compare, consumer: Consumer) -> ResultType
 	where
 		Type: node::Entry,
 		Storage: ?Sized + TreeStorage<Type>,
 		Compare: FnMut(&Type::Key, &Type::Key) -> std::cmp::Ordering,
-		Consumer: std::ops::FnOnce(Option<Type>) -> ResultType,
+		Consumer: std::ops::FnOnce(Option<(&mut Type, Type)>) -> ResultType,
 	{
 		if self.is_empty()
 		{
@@ -227,7 +230,7 @@ impl TreeBase
 		
 		if position != usize::MAX
 		{
-			return consumer(Some(std::mem::replace(storage.nodes_mut()[position].as_mut(), value)));
+			return consumer(Some((storage.nodes_mut()[position].as_mut(), value)));
 		}
 		
 		position = storage.push(node::Node::new(value));
@@ -416,7 +419,7 @@ where
 	pub(super) fn try_insert<Consumer, ResultType, Compare>(&mut self, value: Type, compare: Compare, consumer: Consumer) -> ResultType
 	where
 		Type: node::Entry,
-		Consumer: std::ops::FnOnce(Option<Type>) -> ResultType,
+		Consumer: std::ops::FnOnce(Option<(&mut Type, Type)>) -> ResultType,
 		Compare: FnMut(&Type::Key, &Type::Key) -> std::cmp::Ordering,
 	{
 		self.base.try_insert(&mut self.storage, value, compare, consumer)

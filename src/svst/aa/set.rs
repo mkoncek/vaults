@@ -49,7 +49,7 @@ where
 	where
 		Compare: FnMut(&KeyType, &KeyType) -> std::cmp::Ordering,
 	{
-		self.try_insert(SetEntry {0: value}, compare, |v| v.is_none())
+		self.try_insert(SetEntry {0: value}, compare, |existing| existing.is_none())
 	}
 	
 	/// Like [`replace`](Self::replace), but orders the values using `compare`, see [`insert_by`](Self::insert_by).
@@ -57,7 +57,7 @@ where
 	where
 		Compare: FnMut(&KeyType, &KeyType) -> std::cmp::Ordering,
 	{
-		self.try_insert(SetEntry {0: value}, compare, |v| v.map(|v| v.0))
+		self.try_insert(SetEntry {0: value}, compare, |existing| existing.map(|(existing, value)| std::mem::replace(existing, value).0))
 	}
 	
 	pub fn iter<'t>(&'t self) -> node::Iterator<&'t [node::Node<SetEntry<KeyType>>]>
@@ -81,6 +81,8 @@ where
 		self.get_by(|k| k.borrow().cmp(key))
 	}
 	
+	/// Adds a value to the set, returns whether it was newly inserted.
+	/// If the set already contains an equal value, the set is not modified and `value` is dropped.
 	pub fn insert(&mut self, value: KeyType) -> bool
 	where
 		KeyType: std::cmp::Ord,
@@ -88,6 +90,7 @@ where
 		self.insert_by(value, Ord::cmp)
 	}
 	
+	/// Adds a value to the set, replacing the existing equal value, if any, which is returned.
 	pub fn replace(&mut self, value: KeyType) -> Option<KeyType>
 	where
 		KeyType: std::cmp::Ord,
@@ -297,8 +300,12 @@ fn test_aa_set_by()
 	assert!(set.insert_by(("c", 3), by_number));
 	assert!(set.insert_by(("a", 1), by_number));
 	assert!(set.insert_by(("b", 2), by_number));
+	
+	// Insertion of an equal value keeps the existing one, replacement swaps it
 	assert!(! set.insert_by(("x", 2), by_number));
-	assert!(set.replace_by(("y", 2), by_number).is_some());
+	assert_eq!(Some(&("b", 2)), set.get_by(|v| v.1.cmp(&2)));
+	assert_eq!(Some(("b", 2)), set.replace_by(("y", 2), by_number));
+	assert_eq!(3, set.len());
 	
 	assert_eq!(vec![("a", 1), ("y", 2), ("c", 3)], set.iter().copied().collect::<Vec<_>>());
 	assert_eq!(Some(&("y", 2)), set.get_by(|v| v.1.cmp(&2)));
