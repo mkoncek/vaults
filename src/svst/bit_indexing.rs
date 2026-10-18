@@ -374,7 +374,7 @@ impl From<usize> for Levels
 		
 		while shift <= 64
 		{
-			let mut addition = (result.bitfield >> (shift / 2)) & ((shift / 2) as u128 - 1);
+			let mut addition = (result.bitfield >> (shift / 2)) & ((1 << (shift / 2)) - 1);
 			addition <<= shift;
 			result.bitfield += addition;
 			shift *= 2;
@@ -390,7 +390,7 @@ impl Levels
 	{
 		assert!(index < self.len.max(1), "index is {} but len is {}", index, self.len);
 		let shift = 64 / (1 << index);
-		return ((self.bitfield >> shift) & (shift as u128 - 1)) as usize;
+		return ((self.bitfield >> shift) & ((1 << shift) - 1)) as usize;
 	}
 }
 
@@ -413,6 +413,27 @@ fn test_levels()
 	assert_eq!(IndexType::BITS as usize + 1, Levels::from(2).bitfield);
 	assert_eq!(IndexType::BITS as usize + IndexType::BITS as usize, Levels::from(IndexType::BITS as usize).bitfield);
 	*/
+}
+
+#[test]
+fn test_levels_offsets()
+{
+	for size in [1, 127, 128, 129, 128 * 128, 128 * 128 + 1, 795_566, 1_988_923, 128 * 128 * 128 + 1, u32::MAX as usize]
+	{
+		let mut lengths = vec![level_length(size)];
+		while *lengths.last().unwrap() > 1
+		{
+			lengths.push(level_length(*lengths.last().unwrap()));
+		}
+		
+		let levels = Levels::from(size);
+		assert_eq!(lengths.len() - 1, levels.len as usize, "size {}", size);
+		
+		for i in 0 .. levels.len
+		{
+			assert_eq!(lengths[i as usize + 1 ..].iter().sum::<usize>(), levels.at(i), "size {}, level {}", size, i);
+		}
+	}
 }
 
 pub fn _push_front(index_span: &mut [IndexType], size: usize) -> usize
