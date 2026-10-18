@@ -208,13 +208,21 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 			self[successor].level = level;
 		}
 		
-	// 	NOTE unnecessary, this is set in `erase_rebalance`
-	// 	if (successor_rdes != -1)
-	// 	{
-	// 		set_parent(self[successor_rdes], index);
-	// 	}
+		// NOTE The parent of `successor_rdes` is left pointing to `successor`.
+		// It is not read before `erase_rebalance_leaf(index)`, the only operation following this one,
+		// which sets it to the parent of `index` when unlinking `index`.
 	}
 	
+	/// The number of ancestors which are rebalanced after the last one which was changed.
+	/// 
+	/// Rebalancing a node reads only the nodes up to a fixed depth below it:
+	/// in insertion two (`split` reads the right grandchild),
+	/// in erasure three (`skew` of the right grandchild reads its left child, `split` of the right child reads its right grandchild).
+	/// Rebalancing is a no-op on a node whose nodes up to this depth are the same as in the valid tree before the operation.
+	/// All changes happen in the subtree of the last changed node, so once this many ancestors above it are unchanged,
+	/// no ancestor further above can read a changed node.
+	/// 
+	/// Tests show that insertion fails with 1 and erasure works even with 1, but there is no proof for that.
 	const CHANGE_PROPAGATION_DISTANCE: i32 = 3;
 	
 	fn insert_rebalance(&mut self, mut parent: usize,
