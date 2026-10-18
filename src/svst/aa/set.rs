@@ -316,16 +316,16 @@ fn test_aa_set_by()
 fn test_aa_set_inconsistent_ordering()
 {
 	// An inconsistent ordering gives unspecified results, but the tree stays structurally valid
-	use rand::{Rng, SeedableRng};
+	use rand::{RngExt, SeedableRng};
 	let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
 	let mut set = VecSet::<u32>::new();
 	
 	for _ in 0 .. 5000
 	{
-		let value = rng.gen_range(0 .. 100);
-		let ordering = [std::cmp::Ordering::Less, std::cmp::Ordering::Equal, std::cmp::Ordering::Greater][rng.gen_range(0 .. 3)];
+		let value = rng.random_range(0 .. 100);
+		let ordering = [std::cmp::Ordering::Less, std::cmp::Ordering::Equal, std::cmp::Ordering::Greater][rng.random_range(0 .. 3)];
 		
-		if rng.gen_bool(0.6)
+		if rng.random_bool(0.6)
 		{
 			set.insert_by(value, |_, _| ordering);
 		}
@@ -355,15 +355,15 @@ fn check_against_btree_set<Storage>(mut set: aa::tree::Tree<SetEntry<u32>, Stora
 where
 	Storage: RemovableTreeStorage<SetEntry<u32>>,
 {
-	use rand::{Rng, SeedableRng};
+	use rand::{RngExt, SeedableRng};
 	let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
 	let mut reference = std::collections::BTreeSet::<u32>::new();
 	
 	for iteration in 0 .. iterations
 	{
-		let value = rng.gen_range(0 .. range);
+		let value = rng.random_range(0 .. range);
 		
-		match rng.gen_range(0 .. 8)
+		match rng.random_range(0 .. 8)
 		{
 			0 => assert_eq!(reference.pop_first(), set.pop_first()),
 			1 => assert_eq!(reference.pop_last(), set.pop_last()),
