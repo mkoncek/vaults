@@ -554,7 +554,7 @@ fn test_repository()
 		idxs.push(rp.insert(Box::new(0)));
 	}
 	
-	idxs.shuffle(&mut rand::thread_rng());
+	idxs.shuffle(&mut rand::rng());
 	
 	let limit = 45;
 	
@@ -570,7 +570,7 @@ fn test_repository()
 		idxs.push(rp.insert(Box::new(0)));
 	}
 	
-	idxs.shuffle(&mut rand::thread_rng());
+	idxs.shuffle(&mut rand::rng());
 	
 	for i in 0 .. limit
 	{

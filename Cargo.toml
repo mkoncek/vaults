@@ -17,6 +17,6 @@ name = "bench"
 path = "src/bench.rs"
 
 [dev-dependencies]
-rand = {version = "0.8", features = ["default", "small_rng"]}
+rand = "0.10"
 
 [dependencies]
