@@ -7,15 +7,17 @@ use crate::svst::repository::Repository;
 /// therefore the slices returned by `nodes` and `nodes_mut` may contain dropped values at other indices.
 pub trait TreeStorage<Type>
 {
+	type LinkType: node::LinkIndex;
+	
 	fn len(&self) -> usize;
 	fn capacity(&self) -> usize;
 	fn clear(&mut self);
-	fn nodes(&self) -> &[node::Node<Type>];
-	fn nodes_mut(&mut self) -> &mut [node::Node<Type>];
+	fn nodes(&self) -> &[node::Node<Type, Self::LinkType>];
+	fn nodes_mut(&mut self) -> &mut [node::Node<Type, Self::LinkType>];
 	fn contains(&self, index: usize) -> bool;
 	
 	/// Inserts a node, the indices of the other nodes must not change.
-	fn push(&mut self, value: node::Node<Type>) -> usize;
+	fn push(&mut self, value: node::Node<Type, Self::LinkType>) -> usize;
 }
 
 /// Storage of tree nodes which supports removal.
@@ -27,7 +29,7 @@ pub trait RemovableTreeStorage<Type>: TreeStorage<Type>
 	/// Returns the removed node and the former index of the node which was moved to `index`, or `usize::MAX`.
 	///
 	/// Panics if there is no node at `index`.
-	fn remove(&mut self, index: usize) -> (node::Node<Type>, usize);
+	fn remove(&mut self, index: usize) -> (node::Node<Type, Self::LinkType>, usize);
 	
 	/// Returns a cursor for visiting the indices of all nodes.
 	/// Removal of the most recently visited index must not cause any node to be skipped.
@@ -35,26 +37,32 @@ pub trait RemovableTreeStorage<Type>: TreeStorage<Type>
 	fn advance(&self, cursor: &mut Self::Cursor) -> Option<usize>;
 }
 
-impl<Type> TreeStorage<Type> for Repository<node::Node<Type>>
+impl<Type, LinkType> TreeStorage<Type> for Repository<node::Node<Type, LinkType>>
+where
+	LinkType: node::LinkIndex,
 {
+	type LinkType = LinkType;
+	
 	fn len(&self) -> usize {Repository::len(self)}
 	fn capacity(&self) -> usize {Repository::capacity(self)}
 	fn clear(&mut self) {Repository::clear(self)}
-	fn nodes(&self) -> &[node::Node<Type>] {unsafe {self.as_slice()}}
-	fn nodes_mut(&mut self) -> &mut [node::Node<Type>] {unsafe {self.as_mut_slice()}}
+	fn nodes(&self) -> &[node::Node<Type, LinkType>] {unsafe {self.as_slice()}}
+	fn nodes_mut(&mut self) -> &mut [node::Node<Type, LinkType>] {unsafe {self.as_mut_slice()}}
 	fn contains(&self, index: usize) -> bool {self.get(index).is_some()}
 	
-	fn push(&mut self, value: node::Node<Type>) -> usize
+	fn push(&mut self, value: node::Node<Type, LinkType>) -> usize
 	{
 		self.insert(value)
 	}
 }
 
-impl<Type> RemovableTreeStorage<Type> for Repository<node::Node<Type>>
+impl<Type, LinkType> RemovableTreeStorage<Type> for Repository<node::Node<Type, LinkType>>
+where
+	LinkType: node::LinkIndex,
 {
 	type Cursor = bit_indexing::TransientIndexSliceIterator;
 	
-	fn remove(&mut self, index: usize) -> (node::Node<Type>, usize)
+	fn remove(&mut self, index: usize) -> (node::Node<Type, LinkType>, usize)
 	{
 		(Repository::remove(self, index).expect("no node at index"), usize::MAX)
 	}
@@ -70,16 +78,20 @@ impl<Type> RemovableTreeStorage<Type> for Repository<node::Node<Type>>
 	}
 }
 
-impl<Type> TreeStorage<Type> for Vec<node::Node<Type>>
+impl<Type, LinkType> TreeStorage<Type> for Vec<node::Node<Type, LinkType>>
+where
+	LinkType: node::LinkIndex,
 {
+	type LinkType = LinkType;
+	
 	fn len(&self) -> usize {Vec::len(self)}
 	fn capacity(&self) -> usize {Vec::capacity(self)}
 	fn clear(&mut self) {Vec::clear(self)}
-	fn nodes(&self) -> &[node::Node<Type>] {self.as_slice()}
-	fn nodes_mut(&mut self) -> &mut [node::Node<Type>] {self.as_mut_slice()}
+	fn nodes(&self) -> &[node::Node<Type, LinkType>] {self.as_slice()}
+	fn nodes_mut(&mut self) -> &mut [node::Node<Type, LinkType>] {self.as_mut_slice()}
 	fn contains(&self, index: usize) -> bool {index < Vec::len(self)}
 	
-	fn push(&mut self, value: node::Node<Type>) -> usize
+	fn push(&mut self, value: node::Node<Type, LinkType>) -> usize
 	{
 		Vec::push(self, value);
 		Vec::len(self) - 1
@@ -87,12 +99,14 @@ impl<Type> TreeStorage<Type> for Vec<node::Node<Type>>
 }
 
 /// Removal moves the last node into the place of the removed one.
-impl<Type> RemovableTreeStorage<Type> for Vec<node::Node<Type>>
+impl<Type, LinkType> RemovableTreeStorage<Type> for Vec<node::Node<Type, LinkType>>
+where
+	LinkType: node::LinkIndex,
 {
 	/// Visits the indices in descending order, so the node moved by a removal is one which was already visited.
 	type Cursor = usize;
 	
-	fn remove(&mut self, index: usize) -> (node::Node<Type>, usize)
+	fn remove(&mut self, index: usize) -> (node::Node<Type, LinkType>, usize)
 	{
 		let last = Vec::len(self) - 1;
 		(self.swap_remove(index), if index != last {last} else {usize::MAX})
@@ -114,26 +128,28 @@ impl<Type> RemovableTreeStorage<Type> for Vec<node::Node<Type>>
 
 /// The bookkeeping of an AA tree, independent of the storage of its nodes.
 #[derive(Debug)]
-pub struct TreeBase
+pub struct TreeBase<LinkType = usize>
 {
-	pub root: usize,
-	pub first: usize,
-	pub last: usize,
+	pub root: node::Link<LinkType>,
+	pub first: node::Link<LinkType>,
+	pub last: node::Link<LinkType>,
 }
 
-impl TreeBase
+impl<LinkType> TreeBase<LinkType>
+where
+	LinkType: node::LinkIndex,
 {
 	pub const fn new() -> Self
 	{
 		Self
 		{
-			root: usize::MAX,
-			first: usize::MAX,
-			last: usize::MAX,
+			root: node::Link::NIL,
+			first: node::Link::NIL,
+			last: node::Link::NIL,
 		}
 	}
 	
-	pub fn is_empty(&self) -> bool {self.root == usize::MAX}
+	pub fn is_empty(&self) -> bool {self.root == node::Link::NIL}
 	
 	pub fn clear(&mut self)
 	{
@@ -141,10 +157,10 @@ impl TreeBase
 	}
 	
 	/// `compare` returns the ordering of a key in the tree relative to the searched one.
-	pub fn find<Type, Storage, Compare>(&self, storage: &Storage, mut compare: Compare) -> usize
+	pub fn find<Type, Storage, Compare>(&self, storage: &Storage, mut compare: Compare) -> node::Link<LinkType>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + TreeStorage<Type>,
+		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
 		node::AA::find(storage.nodes(), self.root, |key| compare(key).reverse()).0
@@ -153,12 +169,12 @@ impl TreeBase
 	pub fn get<'t, Type, Storage, Compare>(&self, storage: &'t Storage, compare: Compare) -> Option<&'t Type>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + TreeStorage<Type>,
+		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
 		let index = self.find(storage, compare);
 		
-		if index != usize::MAX
+		if index != node::Link::NIL
 		{
 			return Some(storage.nodes()[index].as_ref());
 		}
@@ -168,9 +184,9 @@ impl TreeBase
 	
 	pub fn first<'t, Type, Storage>(&self, storage: &'t Storage) -> Option<&'t Type>
 	where
-		Storage: ?Sized + TreeStorage<Type>,
+		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
 	{
-		if self.first != usize::MAX
+		if self.first != node::Link::NIL
 		{
 			Some(storage.nodes()[self.first].as_ref())
 		}
@@ -182,9 +198,9 @@ impl TreeBase
 	
 	pub fn last<'t, Type, Storage>(&self, storage: &'t Storage) -> Option<&'t Type>
 	where
-		Storage: ?Sized + TreeStorage<Type>,
+		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
 	{
-		if self.last != usize::MAX
+		if self.last != node::Link::NIL
 		{
 			Some(storage.nodes()[self.last].as_ref())
 		}
@@ -194,9 +210,9 @@ impl TreeBase
 		}
 	}
 	
-	pub fn iter<'t, Type, Storage>(&self, storage: &'t Storage) -> node::Iterator<&'t [node::Node<Type>]>
+	pub fn iter<'t, Type, Storage>(&self, storage: &'t Storage) -> node::Iterator<&'t [node::Node<Type, LinkType>], LinkType>
 	where
-		Storage: ?Sized + TreeStorage<Type>,
+		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
 	{
 		node::Iterator
 		{
@@ -214,13 +230,15 @@ impl TreeBase
 	pub fn try_insert<Type, Storage, Compare, Consumer, ResultType>(&mut self, storage: &mut Storage, value: Type, mut compare: Compare, consumer: Consumer) -> ResultType
 	where
 		Type: node::Entry,
-		Storage: ?Sized + TreeStorage<Type>,
+		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
 		Compare: FnMut(&Type::Key, &Type::Key) -> std::cmp::Ordering,
 		Consumer: std::ops::FnOnce(Option<(&mut Type, Type)>) -> ResultType,
 	{
+		assert!(storage.len() < LinkType::MAX_LEN, "the number of nodes exceeds {}", LinkType::MAX_LEN);
+		
 		if self.is_empty()
 		{
-			self.root = storage.push(node::Node::new(value));
+			self.root = node::Link::new(storage.push(node::Node::new(value)));
 			self.first = self.root;
 			self.last = self.root;
 			return consumer(None);
@@ -228,19 +246,19 @@ impl TreeBase
 		
 		let (mut position, parent, parent_index) = node::AA::find(storage.nodes(), self.root, |key| compare(value.key(), key));
 		
-		if position != usize::MAX
+		if position != node::Link::NIL
 		{
 			return consumer(Some((storage.nodes_mut()[position].as_mut(), value)));
 		}
 		
-		position = storage.push(node::Node::new(value));
+		position = node::Link::new(storage.push(node::Node::new(value)));
 		let nodes = storage.nodes_mut();
 		
 		if node::AA::insert_rebalance(nodes, parent, parent_index, position)
 		{
 			self.root = node::AA::skew(nodes, self.root);
 			self.root = node::AA::split(nodes, self.root);
-			nodes[self.root].parent = usize::MAX;
+			nodes[self.root].parent = node::Link::NIL;
 		}
 		
 		if nodes[self.first].descendants[0] == position || nodes[position].descendants[1] == self.first
@@ -259,23 +277,24 @@ impl TreeBase
 	pub fn remove_at<Type, Storage>(&mut self, storage: &mut Storage, position: usize) -> Option<Type::Value>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + RemovableTreeStorage<Type>,
+		Storage: ?Sized + RemovableTreeStorage<Type, LinkType = LinkType>,
 	{
 		if ! storage.contains(position)
 		{
 			return None;
 		}
 		
+		let position = node::Link::new(position);
 		let nodes = storage.nodes_mut();
 		let parent = nodes[position].parent;
 		let rdes = nodes[position].descendants[1];
 		
 		// The node replacing the root if the root is removed
-		let root_successor = if position == self.root {node::AA::find_successor(nodes, position)} else {usize::MAX};
+		let root_successor = if position == self.root {node::AA::find_successor(nodes, position)} else {node::Link::NIL};
 		
 		let new_root = node::AA::erase_rebalance(nodes, position);
 		
-		if new_root != usize::MAX
+		if new_root != node::Link::NIL
 		{
 			self.root = new_root;
 		}
@@ -286,7 +305,7 @@ impl TreeBase
 		
 		if position == self.first
 		{
-			if rdes != usize::MAX
+			if rdes != node::Link::NIL
 			{
 				self.first = rdes;
 			}
@@ -302,10 +321,11 @@ impl TreeBase
 		}
 		
 		// The node is unlinked now, but it stays at `position` until here
-		let (result, moved) = storage.remove(position);
+		let (result, moved) = storage.remove(position.index());
 		
 		if moved != usize::MAX
 		{
+			let moved = node::Link::new(moved);
 			node::AA::relocate(storage.nodes_mut(), moved, position);
 			
 			for index in [&mut self.root, &mut self.first, &mut self.last]
@@ -323,21 +343,23 @@ impl TreeBase
 	pub fn pop_first<Type, Storage>(&mut self, storage: &mut Storage) -> Option<Type::Value>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + RemovableTreeStorage<Type>,
+		Storage: ?Sized + RemovableTreeStorage<Type, LinkType = LinkType>,
 	{
-		self.remove_at(storage, self.first)
+		self.remove_at(storage, self.first.index())
 	}
 	
 	pub fn pop_last<Type, Storage>(&mut self, storage: &mut Storage) -> Option<Type::Value>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + RemovableTreeStorage<Type>,
+		Storage: ?Sized + RemovableTreeStorage<Type, LinkType = LinkType>,
 	{
-		self.remove_at(storage, self.last)
+		self.remove_at(storage, self.last.index())
 	}
 }
 
-impl Default for TreeBase
+impl<LinkType> Default for TreeBase<LinkType>
+where
+	LinkType: node::LinkIndex,
 {
 	fn default() -> Self {Self::new()}
 }
@@ -345,13 +367,17 @@ impl Default for TreeBase
 /// An AA tree owning the storage of its nodes.
 #[derive(Debug)]
 pub struct Tree<Type, Storage = Repository<node::Node<Type>>>
+where
+	Storage: TreeStorage<Type>,
 {
-	pub(super) base: TreeBase,
+	pub(super) base: TreeBase<Storage::LinkType>,
 	pub(super) storage: Storage,
 	_data: std::marker::PhantomData<Type>,
 }
 
-impl<Type> Tree<Type, Repository<node::Node<Type>>>
+impl<Type, LinkType> Tree<Type, Repository<node::Node<Type, LinkType>>>
+where
+	LinkType: node::LinkIndex,
 {
 	pub const fn new() -> Self
 	{
@@ -374,7 +400,9 @@ impl<Type> Tree<Type, Repository<node::Node<Type>>>
 	}
 }
 
-impl<Type> Tree<Type, Vec<node::Node<Type>>>
+impl<Type, LinkType> Tree<Type, Vec<node::Node<Type, LinkType>>>
+where
+	LinkType: node::LinkIndex,
 {
 	pub const fn new() -> Self
 	{
@@ -425,7 +453,7 @@ where
 		self.base.try_insert(&mut self.storage, value, compare, consumer)
 	}
 	
-	pub(super) fn impl_find<Compare>(&self, compare: Compare) -> usize
+	pub(super) fn impl_find<Compare>(&self, compare: Compare) -> node::Link<Storage::LinkType>
 	where
 		Type: node::Entry,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
@@ -446,11 +474,14 @@ where
 		Type: node::Entry,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
-		match self.impl_find(compare)
+		let index = self.impl_find(compare);
+		
+		if index != node::Link::NIL
 		{
-			usize::MAX => None,
-			index => Some(self.storage.nodes_mut()[index].as_mut()),
+			return Some(self.storage.nodes_mut()[index].as_mut());
 		}
+		
+		return None;
 	}
 	
 	pub fn impl_get_at(&self, position: usize) -> Option<&Type>
@@ -500,7 +531,7 @@ where
 	pub(super) fn impl_first(&self) -> Option<&Type> {self.base.first(&self.storage)}
 	pub(super) fn impl_last(&self) -> Option<&Type> {self.base.last(&self.storage)}
 	
-	pub(super) fn impl_iter(&self) -> node::Iterator<&[node::Node<Type>]>
+	pub(super) fn impl_iter(&self) -> node::Iterator<&[node::Node<Type, Storage::LinkType>], Storage::LinkType>
 	{
 		self.base.iter(&self.storage)
 	}
@@ -548,7 +579,7 @@ where
 
 impl<Type, Storage> Default for Tree<Type, Storage>
 where
-	Storage: Default,
+	Storage: TreeStorage<Type> + Default,
 {
 	fn default() -> Self
 	{
@@ -565,9 +596,9 @@ impl<Type, Storage> Tree<Type, Storage>
 where
 	Storage: TreeStorage<Type>,
 {
-	fn to_dot_node(&self, index: usize, writer: &mut impl std::io::Write) -> std::io::Result<()>
+	fn to_dot_node(&self, index: node::Link<Storage::LinkType>, writer: &mut impl std::io::Write) -> std::io::Result<()>
 	{
-		writeln!(writer, "node{} [shape=record];", index)?;
+		writeln!(writer, "node{} [shape=record];", index.index())?;
 		
 		Ok(())
 	}
@@ -581,7 +612,7 @@ where
 		{
 			let i = node::iter_impl!(it, 0);
 			
-			if i == usize::MAX
+			if i == node::Link::NIL
 			{
 				break;
 			}
@@ -590,15 +621,15 @@ where
 			
 			for d in nodes[i].descendants
 			{
-				if d != usize::MAX
+				if d != node::Link::NIL
 				{
-					writeln!(writer, "node{} -> node{};", i, d)?;
+					writeln!(writer, "node{} -> node{};", i.index(), d.index())?;
 				}
 			}
 			let p = nodes[i].parent;
-			if p != usize::MAX
+			if p != node::Link::NIL
 			{
-				writeln!(writer, "node{} -> node{} [style=dotted];", i, p)?;
+				writeln!(writer, "node{} -> node{} [style=dotted];", i.index(), p.index())?;
 			}
 		}
 		writeln!(writer, "}}")?;

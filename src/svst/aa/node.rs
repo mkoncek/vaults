@@ -6,33 +6,102 @@ pub trait Entry
 	fn value(self) -> Self::Value;
 }
 
-#[derive(Debug)]
-pub struct Node<Type>
+/// An unsigned integer type of the indices of nodes in their storage.
+/// Its maximum value represents no node, so the storage can hold fewer nodes than that.
+pub trait LinkIndex: Copy + Eq + std::fmt::Debug + 'static
 {
-	pub(super) parent: usize,
-	pub(super) descendants: [usize; 2],
+	const NIL: Self;
+	
+	/// The maximum number of nodes in a storage.
+	const MAX_LEN: usize;
+	
+	fn from_usize(index: usize) -> Self;
+	fn to_usize(self) -> usize;
+}
+
+macro_rules! link_index_impl
+{
+	($($type: ty),*) =>
+	{
+		$(
+			impl LinkIndex for $type
+			{
+				const NIL: Self = <$type>::MAX;
+				const MAX_LEN: usize = if <$type>::BITS < usize::BITS {<$type>::MAX as usize} else {usize::MAX};
+				
+				fn from_usize(index: usize) -> Self
+				{
+					debug_assert!(index < Self::MAX_LEN);
+					index as Self
+				}
+				
+				fn to_usize(self) -> usize {self as usize}
+			}
+		)*
+	}
+}
+
+link_index_impl!(u16, u32, u64, usize);
+
+/// The index of a node in its storage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Link<LinkType = usize>(LinkType);
+
+impl<LinkType> Link<LinkType>
+where
+	LinkType: LinkIndex,
+{
+	/// The link to no node.
+	pub const NIL: Self = Self(LinkType::NIL);
+	
+	pub fn new(index: usize) -> Self {Self(LinkType::from_usize(index))}
+	pub fn index(self) -> usize {self.0.to_usize()}
+}
+
+#[derive(Debug)]
+pub struct Node<Type, LinkType = usize>
+{
+	pub(super) parent: Link<LinkType>,
+	pub(super) descendants: [Link<LinkType>; 2],
 	pub(super) level: i16,
 	value: Type,
 }
 
-impl<Type> AsRef<Type> for Node<Type>
+impl<Type, LinkType> std::ops::Index<Link<LinkType>> for [Node<Type, LinkType>]
+where
+	LinkType: LinkIndex,
+{
+	type Output = Node<Type, LinkType>;
+	fn index(&self, index: Link<LinkType>) -> &Self::Output {&self[index.index()]}
+}
+
+impl<Type, LinkType> std::ops::IndexMut<Link<LinkType>> for [Node<Type, LinkType>]
+where
+	LinkType: LinkIndex,
+{
+	fn index_mut(&mut self, index: Link<LinkType>) -> &mut Self::Output {&mut self[index.index()]}
+}
+
+impl<Type, LinkType> AsRef<Type> for Node<Type, LinkType>
 {
 	fn as_ref(&self) -> &Type {&self.value}
 }
 
-impl<Type> AsMut<Type> for Node<Type>
+impl<Type, LinkType> AsMut<Type> for Node<Type, LinkType>
 {
 	fn as_mut(&mut self) -> &mut Type {&mut self.value}
 }
 
-impl<Type> Node<Type>
+impl<Type, LinkType> Node<Type, LinkType>
+where
+	LinkType: LinkIndex,
 {
 	pub fn new(value: Type) -> Self
 	{
 		Self
 		{
-			parent: usize::MAX,
-			descendants: [usize::MAX, usize::MAX],
+			parent: Link::NIL,
+			descendants: [Link::NIL, Link::NIL],
 			level: 0,
 			value,
 		}
@@ -41,9 +110,11 @@ impl<Type> Node<Type>
 	pub fn value(self) -> Type {self.value}
 }
 
-pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
+pub(super) trait AA<Type, LinkType>: std::ops::Index<Link<LinkType>, Output = Node<Type, LinkType>>
+where
+	LinkType: LinkIndex,
 {
-	fn get_parent_index(&self, index: usize, parent: usize) -> u8
+	fn get_parent_index(&self, index: Link<LinkType>, parent: Link<LinkType>) -> u8
 	{
 		for i in 0 .. 2
 		{
@@ -56,13 +127,13 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		unreachable!();
 	}
 	
-	fn skew(&mut self, index: usize) -> usize
+	fn skew(&mut self, index: Link<LinkType>) -> Link<LinkType>
 	where
-		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+		Self: std::ops::IndexMut<Link<LinkType>, Output = Node<Type, LinkType>>,
 	{
 		let l_index = self[index].descendants[0];
 		
-		if l_index == usize::MAX
+		if l_index == Link::NIL
 		{
 			return index;
 		}
@@ -70,7 +141,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		{
 			let lrdesc = self[l_index].descendants[1];
 			
-			if lrdesc != usize::MAX
+			if lrdesc != Link::NIL
 			{
 				self[lrdesc].parent = index;
 			}
@@ -87,13 +158,13 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		return index;
 	}
 	
-	fn split(&mut self, index: usize) -> usize
+	fn split(&mut self, index: Link<LinkType>) -> Link<LinkType>
 	where
-		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+		Self: std::ops::IndexMut<Link<LinkType>, Output = Node<Type, LinkType>>,
 	{
 		let r_index = self[index].descendants[1];
 		
-		if r_index == usize::MAX || self[r_index].descendants[1] == usize::MAX
+		if r_index == Link::NIL || self[r_index].descendants[1] == Link::NIL
 		{
 			return index;
 		}
@@ -101,7 +172,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		{
 			let rldesc = self[r_index].descendants[0];
 			
-			if rldesc != usize::MAX
+			if rldesc != Link::NIL
 			{
 				self[rldesc].parent = index;
 			}
@@ -120,16 +191,16 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 	}
 	
 	/// `compare` returns the ordering of the searched key relative to a key in the tree.
-	fn find<Compare>(&self, root: usize, mut compare: Compare) -> (usize, usize, u8)
+	fn find<Compare>(&self, root: Link<LinkType>, mut compare: Compare) -> (Link<LinkType>, Link<LinkType>, u8)
 	where
 		Type: Entry,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
 		let mut desc = root;
-		let mut parent = usize::MAX;
+		let mut parent = Link::NIL;
 		let mut parent_index: u8 = 0;
 		
-		while desc != usize::MAX
+		while desc != Link::NIL
 		{
 			parent = desc;
 			
@@ -155,9 +226,9 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		return (desc, parent, parent_index);
 	}
 	
-	fn swap_nodes(&mut self, index: usize, successor: usize)
+	fn swap_nodes(&mut self, index: Link<LinkType>, successor: Link<LinkType>)
 	where
-		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+		Self: std::ops::IndexMut<Link<LinkType>, Output = Node<Type, LinkType>>,
 	{
 		if index == successor
 		{
@@ -185,7 +256,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		
 		self[successor].parent = parent;
 		
-		if parent != usize::MAX
+		if parent != Link::NIL
 		{
 			let parent_index = self.get_parent_index(index, parent);
 			self[parent].descendants[parent_index as usize] = successor;
@@ -193,9 +264,9 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		
 		let index_ldes = self[index].descendants[0];
 		self[successor].descendants[0] = index_ldes;
-		self[index].descendants[0] = usize::MAX;
+		self[index].descendants[0] = Link::NIL;
 		
-		if index_ldes != usize::MAX
+		if index_ldes != Link::NIL
 		{
 			self[index_ldes].parent = successor;
 		}
@@ -225,10 +296,10 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 	/// Tests show that insertion fails with 1 and erasure works even with 1, but there is no proof for that.
 	const CHANGE_PROPAGATION_DISTANCE: i32 = 3;
 	
-	fn insert_rebalance(&mut self, mut parent: usize,
-		mut parent_index: u8, mut index: usize) -> bool
+	fn insert_rebalance(&mut self, mut parent: Link<LinkType>,
+		mut parent_index: u8, mut index: Link<LinkType>) -> bool
 	where
-		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+		Self: std::ops::IndexMut<Link<LinkType>, Output = Node<Type, LinkType>>,
 	{
 		self[index].parent = parent;
 		self[parent].descendants[parent_index as usize] = index;
@@ -236,7 +307,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		let mut changes = Self::CHANGE_PROPAGATION_DISTANCE;
 		
 		while {index = parent; parent = self[parent].parent;
-			parent != usize::MAX && changes > 0
+			parent != Link::NIL && changes > 0
 		}
 		{
 			parent_index = self.get_parent_index(index, parent);
@@ -266,9 +337,9 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		return changes > 0;
 	}
 	
-	fn erase_rebalance_leaf(&mut self, mut index: usize) -> usize
+	fn erase_rebalance_leaf(&mut self, mut index: Link<LinkType>) -> Link<LinkType>
 	where
-		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+		Self: std::ops::IndexMut<Link<LinkType>, Output = Node<Type, LinkType>>,
 	{
 		if self[index].level != 0
 		{
@@ -278,12 +349,12 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		let mut rdes = self[index].descendants[1];
 		let mut parent = self[index].parent;
 		
-		if rdes != usize::MAX
+		if rdes != Link::NIL
 		{
 			self[rdes].parent = parent;
 		}
 		
-		if parent == usize::MAX
+		if parent == Link::NIL
 		{
 			return self[index].descendants[1];
 		}
@@ -302,7 +373,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 			parent = self[parent].parent;
 			let mut parent_index = 0;
 			
-			if parent != usize::MAX
+			if parent != Link::NIL
 			{
 				parent_index = self.get_parent_index(index, parent);
 			}
@@ -312,7 +383,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 			{
 				let ldes = self[index].descendants[0];
 				
-				if ldes != usize::MAX
+				if ldes != Link::NIL
 				{
 					level = self[ldes].level;
 				}
@@ -320,7 +391,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 			
 			rdes = self[index].descendants[1];
 			
-			if rdes != usize::MAX
+			if rdes != Link::NIL
 			{
 				let rlevel = self[rdes].level;
 				
@@ -342,7 +413,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 				
 				self[index].level = level;
 				
-				if rdes != usize::MAX && level < self[rdes].level
+				if rdes != Link::NIL && level < self[rdes].level
 				{
 					self[rdes].level = level;
 				}
@@ -360,7 +431,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 			{
 				let mut rdes = self[index].descendants[1];
 				
-				if rdes != usize::MAX
+				if rdes != Link::NIL
 				{
 					rdes = self.skew(rdes);
 					
@@ -372,7 +443,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 					
 					let mut rrdes = self[rdes].descendants[1];
 					
-					if rrdes != usize::MAX
+					if rrdes != Link::NIL
 					{
 						rrdes = self.skew(rrdes);
 						
@@ -396,7 +467,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 			{
 				let mut rdes = self[index].descendants[1];
 				
-				if rdes != usize::MAX
+				if rdes != Link::NIL
 				{
 					rdes = self.split(rdes);
 					
@@ -408,25 +479,25 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 				}
 			}
 			
-			if parent != usize::MAX
+			if parent != Link::NIL
 			{
 				self[parent].descendants[parent_index as usize] = index;
 			}
 			
-			if parent == usize::MAX || changes == 0
+			if parent == Link::NIL || changes == 0
 			{
 				break;
 			}
 		}
 		
-		return if parent == usize::MAX {index} else {usize::MAX};
+		return if parent == Link::NIL {index} else {Link::NIL};
 	}
 	
-	fn find_successor(&mut self, mut index: usize) -> usize
+	fn find_successor(&mut self, mut index: Link<LinkType>) -> Link<LinkType>
 	{
 		if self[index].level == 0
 		{
-			return usize::MAX;
+			return Link::NIL;
 		}
 		
 		index = self[index].descendants[1];
@@ -439,13 +510,13 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		return index;
 	}
 	
-	fn erase_rebalance(&mut self, index: usize) -> usize
+	fn erase_rebalance(&mut self, index: Link<LinkType>) -> Link<LinkType>
 	where
-		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+		Self: std::ops::IndexMut<Link<LinkType>, Output = Node<Type, LinkType>>,
 	{
 		let successor = self.find_successor(index);
 		
-		if successor != usize::MAX
+		if successor != Link::NIL
 		{
 			self.swap_nodes(index, successor);
 		}
@@ -454,13 +525,13 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 	}
 	
 	/// Updates the links pointing to a node which was moved from `from` to `to`.
-	fn relocate(&mut self, from: usize, to: usize)
+	fn relocate(&mut self, from: Link<LinkType>, to: Link<LinkType>)
 	where
-		Self: std::ops::IndexMut<usize, Output = Node<Type>>,
+		Self: std::ops::IndexMut<Link<LinkType>, Output = Node<Type, LinkType>>,
 	{
 		let parent = self[to].parent;
 		
-		if parent != usize::MAX
+		if parent != Link::NIL
 		{
 			let parent_index = self.get_parent_index(from, parent);
 			self[parent].descendants[parent_index as usize] = to;
@@ -470,7 +541,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		{
 			let des = self[to].descendants[i];
 			
-			if des != usize::MAX
+			if des != Link::NIL
 			{
 				self[des].parent = to;
 			}
@@ -478,63 +549,68 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 	}
 }
 
-impl<Indexable, Type> AA<Type> for Indexable
+impl<Indexable, Type, LinkType> AA<Type, LinkType> for Indexable
 where
+	LinkType: LinkIndex,
 	Indexable: ?Sized,
-	Indexable: std::ops::Index<usize, Output = Node<Type>>,
+	Indexable: std::ops::Index<Link<LinkType>, Output = Node<Type, LinkType>>,
 {
 }
 
 /// Checks the AA tree invariants of the subtree, returns the number of its nodes.
 #[cfg(test)]
-pub(super) fn check_invariants<Type>(nodes: &[Node<Type>], root: usize) -> usize
+pub(super) fn check_invariants<Type, LinkType>(nodes: &[Node<Type, LinkType>], root: Link<LinkType>) -> usize
+where
+	LinkType: LinkIndex,
 {
-	if root != usize::MAX
+	if root != Link::NIL
 	{
-		assert_eq!(usize::MAX, nodes[root].parent);
+		assert_eq!(Link::NIL, nodes[root].parent);
 	}
 	
 	return check_subtree(nodes, root);
 }
 
 #[cfg(test)]
-fn check_subtree<Type>(nodes: &[Node<Type>], index: usize) -> usize
+fn check_subtree<Type, LinkType>(nodes: &[Node<Type, LinkType>], index: Link<LinkType>) -> usize
+where
+	LinkType: LinkIndex,
 {
-	if index == usize::MAX
+	if index == Link::NIL
 	{
 		return 0;
 	}
 	
-	let level = |i: usize| if i == usize::MAX {-1} else {nodes[i].level};
+	let level = |i: Link<LinkType>| if i == Link::NIL {-1} else {nodes[i].level};
 	let node = &nodes[index];
 	let [ldes, rdes] = node.descendants;
 	
 	for des in [ldes, rdes]
 	{
-		if des != usize::MAX
+		if des != Link::NIL
 		{
 			assert_eq!(index, nodes[des].parent);
 		}
 	}
 	
-	assert_eq!(node.level - 1, level(ldes), "left child level of {}", index);
-	assert!(level(rdes) == node.level || level(rdes) == node.level - 1, "right child level of {}", index);
+	assert_eq!(node.level - 1, level(ldes), "left child level of {}", index.index());
+	assert!(level(rdes) == node.level || level(rdes) == node.level - 1, "right child level of {}", index.index());
 	
-	if rdes != usize::MAX
+	if rdes != Link::NIL
 	{
-		assert!(level(nodes[rdes].descendants[1]) < node.level, "right grandchild level of {}", index);
+		assert!(level(nodes[rdes].descendants[1]) < node.level, "right grandchild level of {}", index.index());
 	}
 	
 	return 1 + check_subtree(nodes, ldes) + check_subtree(nodes, rdes);
 }
 
-pub struct Iterator<Nodes: ?Sized>
+pub struct Iterator<Nodes: ?Sized, LinkType = usize>
 {
 	#[allow(dead_code)] // Actually used by implementors
-	pub(super) first: usize,
+	pub(super) first: Link<LinkType>,
 	#[allow(dead_code)] // Actually used by implementors
-	pub(super) last: usize,
-	pub(super) bounds: [usize; 2],
+	pub(super) last: Link<LinkType>,
+	pub(super) bounds: [Link<LinkType>; 2],
 	pub(super) nodes: Nodes,
 }
 
@@ -542,9 +618,9 @@ macro_rules! iter_impl
 {
 	($this: expr, $index: expr) =>
 	{
-		if $this.bounds[$index] == usize::MAX
+		if $this.bounds[$index] == $crate::svst::aa::node::Link::NIL
 		{
-			usize::MAX
+			$crate::svst::aa::node::Link::NIL
 		}
 		else
 		{
@@ -552,13 +628,13 @@ macro_rules! iter_impl
 			
 			let desc = $this.nodes[$this.bounds[$index]].descendants[1 - $index];
 			
-			if desc != usize::MAX
+			if desc != $crate::svst::aa::node::Link::NIL
 			{
 				$this.bounds[$index] = desc;
 				
 				let mut descendant;
 				
-				while {descendant = $this.nodes[$this.bounds[$index]].descendants[$index]; descendant != usize::MAX}
+				while {descendant = $this.nodes[$this.bounds[$index]].descendants[$index]; descendant != $crate::svst::aa::node::Link::NIL}
 				{
 					$this.bounds[$index] = descendant;
 				}
@@ -569,9 +645,9 @@ macro_rules! iter_impl
 				{
 					let parent = $this.nodes[$this.bounds[$index]].parent;
 					
-					if parent == usize::MAX
+					if parent == $crate::svst::aa::node::Link::NIL
 					{
-						$this.bounds[1 - $index] = usize::MAX;
+						$this.bounds[1 - $index] = $crate::svst::aa::node::Link::NIL;
 					}
 					else if $crate::svst::aa::node::AA::get_parent_index($this.nodes, $this.bounds[$index], parent) == 1 - $index
 					{

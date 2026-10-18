@@ -13,8 +13,8 @@ impl<KeyType, MappedType> node::Entry for MapEntry<KeyType, MappedType>
 	fn value(self) -> Self::Value {(self.0, self.1)}
 }
 
-pub type Map<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>>;
-pub type VecMap<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>, Vec<node::Node<MapEntry<KeyType, MappedType>>>>;
+pub type Map<KeyType, MappedType, LinkType = usize> = aa::tree::Tree<MapEntry<KeyType, MappedType>, crate::svst::Repository<node::Node<MapEntry<KeyType, MappedType>, LinkType>>>;
+pub type VecMap<KeyType, MappedType, LinkType = usize> = aa::tree::Tree<MapEntry<KeyType, MappedType>, Vec<node::Node<MapEntry<KeyType, MappedType>, LinkType>>>;
 
 impl<KeyType, MappedType, Storage> aa::tree::Tree<MapEntry<KeyType, MappedType>, Storage>
 where
@@ -31,7 +31,7 @@ where
 	where
 		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_find(compare) != usize::MAX
+		self.impl_find(compare) != node::Link::NIL
 	}
 	
 	/// Like [`get`](Self::get), but searches using `compare`, see [`contains_key_by`](Self::contains_key_by).
@@ -151,9 +151,9 @@ where
 	{
 		let index = self.impl_find(compare);
 		
-		if index != usize::MAX
+		if index != node::Link::NIL
 		{
-			return self.remove_at(index);
+			return self.remove_at(index.index());
 		}
 		
 		return None;
