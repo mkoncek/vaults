@@ -23,34 +23,39 @@ where
 	pub fn first(&self) -> Option<&KeyType> {self.impl_first().map(|k| &k.0)}
 	pub fn last(&self) -> Option<&KeyType> {self.impl_last().map(|k| &k.0)}
 	
-	pub unsafe fn contains_with_comparator<Key, Compare>(&self, key: &Key, compare: Compare) -> bool
+	/// Like [`contains`](Self::contains), but searches using `compare`,
+	/// which returns the ordering of a value in the set relative to the searched one.
+	/// 
+	/// The ordering must be consistent with the one used for insertion, otherwise the result is unspecified.
+	pub fn contains_by<Compare>(&self, compare: Compare) -> bool
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_find(key, compare) != usize::MAX
+		self.impl_find(compare) != usize::MAX
 	}
 	
-	pub unsafe fn get_with_comparator<Key, Compare>(&self, key: &Key, compare: Compare) -> Option<&KeyType>
+	/// Like [`get`](Self::get), but searches using `compare`, see [`contains_by`](Self::contains_by).
+	pub fn get_by<Compare>(&self, compare: Compare) -> Option<&KeyType>
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_get(key, compare).map(|k| &k.0)
+		self.impl_get(compare).map(|k| &k.0)
 	}
 	
-	pub unsafe fn insert_with_comparator<Compare>(&mut self, value: KeyType, compare: Compare) -> bool
+	/// Like [`insert`](Self::insert), but orders the values using `compare`.
+	/// 
+	/// The ordering must be consistent for all operations on the set, otherwise their results are unspecified.
+	pub fn insert_by<Compare>(&mut self, value: KeyType, compare: Compare) -> bool
 	where
-		Compare: crate::Comparator<KeyType>,
+		Compare: FnMut(&KeyType, &KeyType) -> std::cmp::Ordering,
 	{
 		self.try_insert(SetEntry {0: value}, compare, |v| v.is_none())
 	}
 	
-	pub unsafe fn replace_with_comparator<Compare>(&mut self, value: KeyType, compare: Compare) -> Option<KeyType>
+	/// Like [`replace`](Self::replace), but orders the values using `compare`, see [`insert_by`](Self::insert_by).
+	pub fn replace_by<Compare>(&mut self, value: KeyType, compare: Compare) -> Option<KeyType>
 	where
-		Compare: crate::Comparator<KeyType>,
+		Compare: FnMut(&KeyType, &KeyType) -> std::cmp::Ordering,
 	{
 		self.try_insert(SetEntry {0: value}, compare, |v| v.map(|v| v.0))
 	}
@@ -65,7 +70,7 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.contains_with_comparator(key, crate::DefaultComparator::new())}
+		self.contains_by(|k| k.borrow().cmp(key))
 	}
 	
 	pub fn get<Key>(&self, key: &Key) -> Option<&KeyType>
@@ -73,21 +78,21 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.get_with_comparator(key, crate::DefaultComparator::new())}
+		self.get_by(|k| k.borrow().cmp(key))
 	}
 	
 	pub fn insert(&mut self, value: KeyType) -> bool
 	where
 		KeyType: std::cmp::Ord,
 	{
-		unsafe {self.insert_with_comparator(value, crate::DefaultComparator::new())}
+		self.insert_by(value, Ord::cmp)
 	}
 	
 	pub fn replace(&mut self, value: KeyType) -> Option<KeyType>
 	where
 		KeyType: std::cmp::Ord,
 	{
-		unsafe {self.replace_with_comparator(value, crate::DefaultComparator::new())}
+		self.replace_by(value, Ord::cmp)
 	}
 	
 	pub unsafe fn get_at_unchecked(&self, position: usize) -> &KeyType
@@ -100,13 +105,12 @@ impl<KeyType, Storage> aa::tree::Tree<SetEntry<KeyType>, Storage>
 where
 	Storage: RemovableTreeStorage<SetEntry<KeyType>>,
 {
-	pub unsafe fn remove_with_comparator<Key, Compare>(&mut self, value: &Key, compare: Compare) -> bool
+	/// Like [`remove`](Self::remove), but searches using `compare`, see [`contains_by`](Self::contains_by).
+	pub fn remove_by<Compare>(&mut self, compare: Compare) -> bool
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		let index = self.impl_find(value, compare);
+		let index = self.impl_find(compare);
 		
 		if index != usize::MAX
 		{
@@ -129,7 +133,7 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.remove_with_comparator(value, crate::DefaultComparator::new())}
+		self.remove_by(|k| k.borrow().cmp(value))
 	}
 }
 
@@ -282,6 +286,63 @@ fn test_aa_vec_set()
 	set.retain(|i| i % 2 == 0);
 	assert_eq!(vec![8, 10, 12, 14], set.iter().copied().collect::<Vec<_>>());
 	assert_eq!(4, set.len());
+}
+
+#[test]
+fn test_aa_set_by()
+{
+	// Ordered by the second field only, looked up by it without constructing a whole value
+	let mut set = Set::<(&str, u32)>::new();
+	let by_number = |lhs: &(&str, u32), rhs: &(&str, u32)| lhs.1.cmp(&rhs.1);
+	assert!(set.insert_by(("c", 3), by_number));
+	assert!(set.insert_by(("a", 1), by_number));
+	assert!(set.insert_by(("b", 2), by_number));
+	assert!(! set.insert_by(("x", 2), by_number));
+	assert!(set.replace_by(("y", 2), by_number).is_some());
+	
+	assert_eq!(vec![("a", 1), ("y", 2), ("c", 3)], set.iter().copied().collect::<Vec<_>>());
+	assert_eq!(Some(&("y", 2)), set.get_by(|v| v.1.cmp(&2)));
+	assert!(! set.contains_by(|v| v.1.cmp(&4)));
+	assert!(set.remove_by(|v| v.1.cmp(&1)));
+	assert_eq!(vec![("y", 2), ("c", 3)], set.iter().copied().collect::<Vec<_>>());
+}
+
+#[test]
+fn test_aa_set_inconsistent_ordering()
+{
+	// An inconsistent ordering gives unspecified results, but the tree stays structurally valid
+	use rand::{Rng, SeedableRng};
+	let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+	let mut set = VecSet::<u32>::new();
+	
+	for _ in 0 .. 5000
+	{
+		let value = rng.gen_range(0 .. 100);
+		let ordering = [std::cmp::Ordering::Less, std::cmp::Ordering::Equal, std::cmp::Ordering::Greater][rng.gen_range(0 .. 3)];
+		
+		if rng.gen_bool(0.6)
+		{
+			set.insert_by(value, |_, _| ordering);
+		}
+		else
+		{
+			set.remove_by(|_| ordering);
+		}
+		
+		assert_eq!(set.len(), node::check_invariants(set.storage.nodes(), set.base.root));
+		assert_eq!(set.len(), set.iter().count());
+		
+		// The first and last nodes are the leftmost and rightmost ones
+		for (bound, side) in [(set.base.first, 0), (set.base.last, 1)]
+		{
+			let mut index = set.base.root;
+			while index != usize::MAX && set.storage[index].descendants[side] != usize::MAX
+			{
+				index = set.storage[index].descendants[side];
+			}
+			assert_eq!(index, bound);
+		}
+	}
 }
 
 #[cfg(test)]
