@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use crate::svst::aa::node;
 use crate::svst::bit_indexing;
 use crate::svst::repository::Repository;
@@ -141,24 +140,23 @@ impl TreeBase
 		*self = Self::new();
 	}
 	
-	pub fn find<Type, Key, Storage, Compare>(&self, storage: &Storage, key: &Key, compare: Compare) -> usize
+	/// `compare` returns the ordering of a key in the tree relative to the searched one.
+	pub fn find<Type, Storage, Compare>(&self, storage: &Storage, mut compare: Compare) -> usize
 	where
 		Type: node::Entry,
-		Key: ?Sized,
 		Storage: ?Sized + TreeStorage<Type>,
-		Compare: Fn(&Key, &Type::Key) -> std::cmp::Ordering,
+		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
-		node::AA::find(storage.nodes(), self.root, key, compare).0
+		node::AA::find(storage.nodes(), self.root, |key| compare(key).reverse()).0
 	}
 	
-	pub fn get<'t, Type, Key, Storage, Compare>(&self, storage: &'t Storage, key: &Key, compare: Compare) -> Option<&'t Type>
+	pub fn get<'t, Type, Storage, Compare>(&self, storage: &'t Storage, compare: Compare) -> Option<&'t Type>
 	where
 		Type: node::Entry,
-		Key: ?Sized,
 		Storage: ?Sized + TreeStorage<Type>,
-		Compare: Fn(&Key, &Type::Key) -> std::cmp::Ordering,
+		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
-		let index = self.find(storage, key, compare);
+		let index = self.find(storage, compare);
 		
 		if index != usize::MAX
 		{
@@ -209,11 +207,12 @@ impl TreeBase
 		}
 	}
 	
-	pub fn try_insert<Type, Storage, Compare, Consumer, ResultType>(&mut self, storage: &mut Storage, value: Type, compare: Compare, consumer: Consumer) -> ResultType
+	/// `compare` returns the ordering of its first argument relative to the second one.
+	pub fn try_insert<Type, Storage, Compare, Consumer, ResultType>(&mut self, storage: &mut Storage, value: Type, mut compare: Compare, consumer: Consumer) -> ResultType
 	where
 		Type: node::Entry,
 		Storage: ?Sized + TreeStorage<Type>,
-		Compare: Fn(&Type::Key, &Type::Key) -> std::cmp::Ordering,
+		Compare: FnMut(&Type::Key, &Type::Key) -> std::cmp::Ordering,
 		Consumer: std::ops::FnOnce(Option<Type>) -> ResultType,
 	{
 		if self.is_empty()
@@ -224,7 +223,7 @@ impl TreeBase
 			return consumer(None);
 		}
 		
-		let (mut position, parent, parent_index) = node::AA::find(storage.nodes(), self.root, value.key(), compare);
+		let (mut position, parent, parent_index) = node::AA::find(storage.nodes(), self.root, |key| compare(value.key(), key));
 		
 		if position != usize::MAX
 		{
@@ -418,39 +417,33 @@ where
 	where
 		Type: node::Entry,
 		Consumer: std::ops::FnOnce(Option<Type>) -> ResultType,
-		Compare: crate::Comparator<Type::Key>,
+		Compare: FnMut(&Type::Key, &Type::Key) -> std::cmp::Ordering,
 	{
-		self.base.try_insert(&mut self.storage, value, |l, r| compare.compare(l, r), consumer)
+		self.base.try_insert(&mut self.storage, value, compare, consumer)
 	}
 	
-	pub(super) fn impl_find<Key, Compare>(&self, key: &Key, compare: Compare) -> usize
+	pub(super) fn impl_find<Compare>(&self, compare: Compare) -> usize
 	where
 		Type: node::Entry,
-		Type::Key: Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
-		self.base.find(&self.storage, key, |l, r| compare.compare(l, r.borrow()))
+		self.base.find(&self.storage, compare)
 	}
 	
-	pub(super) fn impl_get<Key, Compare>(&self, key: &Key, compare: Compare) -> Option<&Type>
+	pub(super) fn impl_get<Compare>(&self, compare: Compare) -> Option<&Type>
 	where
 		Type: node::Entry,
-		Type::Key: Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
-		self.base.get(&self.storage, key, |l, r| compare.compare(l, r.borrow()))
+		self.base.get(&self.storage, compare)
 	}
 	
-	pub(super) fn impl_get_mut<Key, Compare>(&mut self, key: &Key, compare: Compare) -> Option<&mut Type>
+	pub(super) fn impl_get_mut<Compare>(&mut self, compare: Compare) -> Option<&mut Type>
 	where
 		Type: node::Entry,
-		Type::Key: Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
-		match self.impl_find(key, compare)
+		match self.impl_find(compare)
 		{
 			usize::MAX => None,
 			index => Some(self.storage.nodes_mut()[index].as_mut()),

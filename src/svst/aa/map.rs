@@ -23,45 +23,47 @@ where
 	pub fn first_key_value(&self) -> Option<(&KeyType, &MappedType)> {self.impl_first().map(|v| (&v.0, &v.1))}
 	pub fn last_key_value(&self) -> Option<(&KeyType, &MappedType)> {self.impl_last().map(|v| (&v.0, &v.1))}
 	
-	pub unsafe fn contains_key_with_comparator<Key, Compare>(&self, key: &Key, compare: Compare) -> bool
+	/// Like [`contains_key`](Self::contains_key), but searches using `compare`,
+	/// which returns the ordering of a key in the map relative to the searched one.
+	/// 
+	/// The ordering must be consistent with the one used for insertion, otherwise the result is unspecified.
+	pub fn contains_key_by<Compare>(&self, compare: Compare) -> bool
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_find(key, compare) != usize::MAX
+		self.impl_find(compare) != usize::MAX
 	}
 	
-	pub unsafe fn get_with_comparator<Key, Compare>(&self, key: &Key, compare: Compare) -> Option<&MappedType>
+	/// Like [`get`](Self::get), but searches using `compare`, see [`contains_key_by`](Self::contains_key_by).
+	pub fn get_by<Compare>(&self, compare: Compare) -> Option<&MappedType>
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_get(key, compare).map(|v| &v.1)
+		self.impl_get(compare).map(|v| &v.1)
 	}
 	
-	pub unsafe fn get_mut_with_comparator<Key, Compare>(&mut self, key: &Key, compare: Compare) -> Option<&mut MappedType>
+	/// Like [`get_mut`](Self::get_mut), but searches using `compare`, see [`contains_key_by`](Self::contains_key_by).
+	pub fn get_mut_by<Compare>(&mut self, compare: Compare) -> Option<&mut MappedType>
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_get_mut(key, compare).map(|v| &mut v.1)
+		self.impl_get_mut(compare).map(|v| &mut v.1)
 	}
 	
-	pub unsafe fn get_key_value_with_comparator<Key, Compare>(&self, key: &Key, compare: Compare) -> Option<(&KeyType, &MappedType)>
+	/// Like [`get_key_value`](Self::get_key_value), but searches using `compare`, see [`contains_key_by`](Self::contains_key_by).
+	pub fn get_key_value_by<Compare>(&self, compare: Compare) -> Option<(&KeyType, &MappedType)>
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_get(key, compare).map(|v| (&v.0, &v.1))
+		self.impl_get(compare).map(|v| (&v.0, &v.1))
 	}
 	
-	pub unsafe fn insert_with_comparator<Compare>(&mut self, key: KeyType, mapped: MappedType, compare: Compare) -> Option<MappedType>
+	/// Like [`insert`](Self::insert), but orders the keys using `compare`.
+	/// 
+	/// The ordering must be consistent for all operations on the map, otherwise their results are unspecified.
+	pub fn insert_by<Compare>(&mut self, key: KeyType, mapped: MappedType, compare: Compare) -> Option<MappedType>
 	where
-		Compare: crate::Comparator<KeyType>,
+		Compare: FnMut(&KeyType, &KeyType) -> std::cmp::Ordering,
 	{
 		self.try_insert(MapEntry {0: key, 1: mapped}, compare, |v| v.map(|v| v.1))
 	}
@@ -71,7 +73,7 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.contains_key_with_comparator(key, crate::DefaultComparator::new())}
+		self.contains_key_by(|k| k.borrow().cmp(key))
 	}
 	
 	pub fn get<Key>(&self, key: &Key) -> Option<&MappedType>
@@ -79,7 +81,7 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.get_with_comparator(key, crate::DefaultComparator::new())}
+		self.get_by(|k| k.borrow().cmp(key))
 	}
 	
 	pub fn get_mut<Key>(&mut self, key: &Key) -> Option<&mut MappedType>
@@ -87,7 +89,7 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.get_mut_with_comparator(key, crate::DefaultComparator::new())}
+		self.get_mut_by(|k| k.borrow().cmp(key))
 	}
 	
 	pub fn get_key_value<Key>(&self, key: &Key) -> Option<(&KeyType, &MappedType)>
@@ -95,14 +97,14 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.get_key_value_with_comparator(key, crate::DefaultComparator::new())}
+		self.get_key_value_by(|k| k.borrow().cmp(key))
 	}
 	
 	pub fn insert(&mut self, key: KeyType, mapped: MappedType) -> Option<MappedType>
 	where
 		KeyType: std::cmp::Ord,
 	{
-		unsafe {self.insert_with_comparator(key, mapped, crate::DefaultComparator::new())}
+		self.insert_by(key, mapped, Ord::cmp)
 	}
 	
 	pub unsafe fn get_at_unchecked(&self, position: usize) -> &MappedType
@@ -132,22 +134,20 @@ impl<KeyType, MappedType, Storage> aa::tree::Tree<MapEntry<KeyType, MappedType>,
 where
 	Storage: RemovableTreeStorage<MapEntry<KeyType, MappedType>>,
 {
-	pub unsafe fn remove_with_comparator<Key, Compare>(&mut self, key: &Key, compare: Compare) -> Option<MappedType>
+	/// Like [`remove`](Self::remove), but searches using `compare`, see [`contains_key_by`](Self::contains_key_by).
+	pub fn remove_by<Compare>(&mut self, compare: Compare) -> Option<MappedType>
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		return self.remove_entry_with_comparator(key, compare).map(|v| v.1);
+		return self.remove_entry_by(compare).map(|v| v.1);
 	}
 	
-	pub unsafe fn remove_entry_with_comparator<Key, Compare>(&mut self, key: &Key, compare: Compare) -> Option<(KeyType, MappedType)>
+	/// Like [`remove_entry`](Self::remove_entry), but searches using `compare`, see [`contains_key_by`](Self::contains_key_by).
+	pub fn remove_entry_by<Compare>(&mut self, compare: Compare) -> Option<(KeyType, MappedType)>
 	where
-		KeyType: std::borrow::Borrow<Key>,
-		Key: ?Sized,
-		Compare: crate::Comparator<Key>,
+		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		let index = self.impl_find(key, compare);
+		let index = self.impl_find(compare);
 		
 		if index != usize::MAX
 		{
@@ -169,7 +169,7 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.remove_with_comparator(key, crate::DefaultComparator::new())}
+		self.remove_by(|k| k.borrow().cmp(key))
 	}
 	
 	pub fn remove_entry<Key>(&mut self, key: &Key) -> Option<(KeyType, MappedType)>
@@ -177,7 +177,7 @@ where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
 		Key: ?Sized + std::cmp::Ord,
 	{
-		unsafe {self.remove_entry_with_comparator(key, crate::DefaultComparator::new())}
+		self.remove_entry_by(|k| k.borrow().cmp(key))
 	}
 }
 
@@ -210,6 +210,10 @@ fn test_aa_vec_map()
 	*map.get_mut("a").unwrap() += 10;
 	assert_eq!(Some((&"a".to_owned(), &11)), map.first_key_value());
 	assert_eq!(Some((&"c".to_owned(), &3)), map.last_key_value());
+	
+	assert_eq!(Some((&"c".to_owned(), &3)), map.get_key_value_by(|k| k.as_str().cmp("c")));
+	assert_eq!(None, map.insert_by("d".to_owned(), 4, |lhs, rhs| lhs.len().cmp(&rhs.len()).then(lhs.cmp(rhs))));
+	assert_eq!(Some(4), map.remove_by(|k| k.as_str().cmp("d")));
 	
 	assert_eq!(Some(11), map.remove("a"));
 	assert_eq!(Some(("c".to_owned(), 3)), map.remove_entry("c"));

@@ -119,11 +119,11 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		return index;
 	}
 	
-	fn find<Key, Compare>(&self, root: usize, key: &Key, comapre: Compare) -> (usize, usize, u8)
+	/// `compare` returns the ordering of the searched key relative to a key in the tree.
+	fn find<Compare>(&self, root: usize, mut compare: Compare) -> (usize, usize, u8)
 	where
 		Type: Entry,
-		Key: ?Sized,
-		Compare: Fn(&Key, &Type::Key) -> std::cmp::Ordering,
+		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
 		let mut desc = root;
 		let mut parent = usize::MAX;
@@ -133,7 +133,7 @@ pub(super) trait AA<Type>: std::ops::Index<usize, Output = Node<Type>>
 		{
 			parent = desc;
 			
-			match comapre(key, self[desc].value.key())
+			match compare(self[desc].value.key())
 			{
 				std::cmp::Ordering::Less =>
 				{
