@@ -13,8 +13,8 @@ impl<KeyType> node::Entry for SetEntry<KeyType>
 	fn value(self) -> Self::Value {self.0}
 }
 
-pub type Set<KeyType> = aa::tree::Tree<SetEntry<KeyType>>;
-pub type VecSet<KeyType> = aa::tree::Tree<SetEntry<KeyType>, Vec<node::Node<SetEntry<KeyType>>>>;
+pub type Set<KeyType, LinkType = usize> = aa::tree::Tree<SetEntry<KeyType>, crate::svst::Repository<node::Node<SetEntry<KeyType>, LinkType>>>;
+pub type VecSet<KeyType, LinkType = usize> = aa::tree::Tree<SetEntry<KeyType>, Vec<node::Node<SetEntry<KeyType>, LinkType>>>;
 
 impl<KeyType, Storage> aa::tree::Tree<SetEntry<KeyType>, Storage>
 where
@@ -31,7 +31,7 @@ where
 	where
 		Compare: FnMut(&KeyType) -> std::cmp::Ordering,
 	{
-		self.impl_find(compare) != usize::MAX
+		self.impl_find(compare) != node::Link::NIL
 	}
 	
 	/// Like [`get`](Self::get), but searches using `compare`, see [`contains_by`](Self::contains_by).
@@ -60,7 +60,7 @@ where
 		self.try_insert(SetEntry {0: value}, compare, |existing| existing.map(|(existing, value)| std::mem::replace(existing, value).0))
 	}
 	
-	pub fn iter<'t>(&'t self) -> node::Iterator<&'t [node::Node<SetEntry<KeyType>>]>
+	pub fn iter<'t>(&'t self) -> node::Iterator<&'t [node::Node<SetEntry<KeyType>, Storage::LinkType>], Storage::LinkType>
 	{
 		self.impl_iter()
 	}
@@ -115,9 +115,9 @@ where
 	{
 		let index = self.impl_find(compare);
 		
-		if index != usize::MAX
+		if index != node::Link::NIL
 		{
-			self.remove_at(index);
+			self.remove_at(index.index());
 			return true;
 		}
 		
@@ -140,29 +140,27 @@ where
 	}
 }
 
-impl<'t, Type> std::iter::Iterator for node::Iterator<&'t [node::Node<SetEntry<Type>>]>
+impl<'t, Type, LinkType> std::iter::Iterator for node::Iterator<&'t [node::Node<SetEntry<Type>, LinkType>], LinkType>
+where
+	LinkType: node::LinkIndex,
 {
 	type Item = &'t Type;
 	
 	fn next(&mut self) -> Option<Self::Item>
 	{
-		match node::iter_impl!(self, 0)
-		{
-			usize::MAX => None,
-			i => Some(&self.nodes[i].as_ref().0),
-		}
+		let i = node::iter_impl!(self, 0);
+		return if i != node::Link::NIL {Some(&self.nodes[i].as_ref().0)} else {None};
 	}
 }
 
-impl<'t, Type> std::iter::DoubleEndedIterator for node::Iterator<&'t [node::Node<SetEntry<Type>>]>
+impl<'t, Type, LinkType> std::iter::DoubleEndedIterator for node::Iterator<&'t [node::Node<SetEntry<Type>, LinkType>], LinkType>
+where
+	LinkType: node::LinkIndex,
 {
 	fn next_back(&mut self) -> Option<Self::Item>
 	{
-		match node::iter_impl!(self, 1)
-		{
-			usize::MAX => None,
-			i => Some(&self.nodes[i].as_ref().0),
-		}
+		let i = node::iter_impl!(self, 1);
+		return if i != node::Link::NIL {Some(&self.nodes[i].as_ref().0)} else {None};
 	}
 }
 
@@ -171,7 +169,7 @@ where
 	Storage: TreeStorage<SetEntry<Type>>,
 {
 	type Item = &'t Type;
-	type IntoIter = node::Iterator<&'t [node::Node<SetEntry<Type>>]>;
+	type IntoIter = node::Iterator<&'t [node::Node<SetEntry<Type>, Storage::LinkType>], Storage::LinkType>;
 	
 	fn into_iter(self) -> Self::IntoIter
 	{
@@ -343,9 +341,9 @@ fn test_aa_set_inconsistent_ordering()
 		for (bound, side) in [(set.base.first, 0), (set.base.last, 1)]
 		{
 			let mut index = set.base.root;
-			while index != usize::MAX && set.storage[index].descendants[side] != usize::MAX
+			while index != node::Link::NIL && set.storage.nodes()[index].descendants[side] != node::Link::NIL
 			{
-				index = set.storage[index].descendants[side];
+				index = set.storage.nodes()[index].descendants[side];
 			}
 			assert_eq!(index, bound);
 		}
@@ -410,6 +408,13 @@ fn test_aa_vec_set_random()
 {
 	check_against_btree_set(VecSet::<u32>::new(), 500, 20000);
 	check_against_btree_set(VecSet::<u32>::new(), 5000, 20000);
+}
+
+#[test]
+fn test_aa_set_u32_links_random()
+{
+	check_against_btree_set(Set::<u32, u32>::new(), 5000, 20000);
+	check_against_btree_set(VecSet::<u32, u32>::new(), 5000, 20000);
 }
 
 /*
