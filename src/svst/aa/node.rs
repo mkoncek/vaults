@@ -284,17 +284,30 @@ where
 		// which sets it to the parent of `index` when unlinking `index`.
 	}
 	
-	/// The number of ancestors which are rebalanced after the last one which was changed.
+	/// The number of ancestors which are rebalanced in insertion after the last one which was changed,
+	/// counting the inserted node as changed.
 	/// 
-	/// Rebalancing a node reads only the nodes up to a fixed depth below it:
-	/// in insertion two (`split` reads the right grandchild),
-	/// in erasure three (`skew` of the right grandchild reads its left child, `split` of the right child reads its right grandchild).
-	/// Rebalancing is a no-op on a node whose nodes up to this depth are the same as in the valid tree before the operation.
-	/// All changes happen in the subtree of the last changed node, so once this many ancestors above it are unchanged,
-	/// no ancestor further above can read a changed node.
+	/// Rebalancing a node reads only the nodes up to two levels below it, `skew` reads the left child and `split` the right grandchild.
+	/// All changes happen in the subtree of the last changed node and the unchanged ancestors keep their levels,
+	/// so the ancestors further above read the same nodes as in the valid tree before the insertion, where rebalancing is a no-op.
 	/// 
-	/// Tests show that insertion fails with 1 and erasure works even with 1, but there is no proof for that.
-	const CHANGE_PROPAGATION_DISTANCE: i32 = 3;
+	/// One is not enough, `split` raises the root of the changed subtree to the level of its parent,
+	/// which can create two consecutive right horizontal links at the grandparent.
+	/// This happens already when inserting the third ascending value.
+	const INSERT_PROPAGATION_DISTANCE: i32 = 2;
+	
+	/// The number of ancestors which are rebalanced in erasure after the last one which was changed,
+	/// counting the removed node as changed.
+	/// 
+	/// Rebalancing a node in erasure makes its subtree a valid tree whose root level is the original one or one lower.
+	/// If the rebalancing of its parent is a no-op, the parent's children have the levels required by the invariants,
+	/// since they are not lower than the parent's level minus one and not higher than originally,
+	/// and the right grandchild is lower than the parent, otherwise `split` would act.
+	/// So the subtree of the parent is valid with the same root and level.
+	/// The grandparent then reads the unchanged level of the parent and nodes in its valid subtree,
+	/// except for `split` comparing its level with the right grandchild,
+	/// which was lower than it before and the levels only decreased, so rebalancing it is also a no-op, and so on.
+	const ERASE_PROPAGATION_DISTANCE: i32 = 1;
 	
 	fn insert_rebalance(&mut self, mut parent: Link<LinkType>,
 		mut parent_index: u8, mut index: Link<LinkType>) -> bool
@@ -304,7 +317,7 @@ where
 		self[index].parent = parent;
 		self[parent].descendants[parent_index as usize] = index;
 		
-		let mut changes = Self::CHANGE_PROPAGATION_DISTANCE;
+		let mut changes = Self::INSERT_PROPAGATION_DISTANCE;
 		
 		while {index = parent; parent = self[parent].parent;
 			parent != Link::NIL && changes > 0
@@ -319,7 +332,7 @@ where
 			if nv != index
 			{
 				index = nv;
-				changes = Self::CHANGE_PROPAGATION_DISTANCE;
+				changes = Self::INSERT_PROPAGATION_DISTANCE;
 			}
 			
 			let nv = self.split(index);
@@ -327,7 +340,7 @@ where
 			if nv != index
 			{
 				index = nv;
-				changes = Self::CHANGE_PROPAGATION_DISTANCE;
+				changes = Self::INSERT_PROPAGATION_DISTANCE;
 			}
 			
 			self[index].parent = parent;
@@ -364,7 +377,7 @@ where
 			self[parent].descendants[parent_index as usize] = rdes;
 		}
 		
-		let mut changes = Self::CHANGE_PROPAGATION_DISTANCE;
+		let mut changes = Self::ERASE_PROPAGATION_DISTANCE;
 		
 		loop
 		{
@@ -409,7 +422,7 @@ where
 			
 			if level < self[index].level
 			{
-				changes = Self::CHANGE_PROPAGATION_DISTANCE;
+				changes = Self::ERASE_PROPAGATION_DISTANCE;
 				
 				self[index].level = level;
 				
@@ -425,7 +438,7 @@ where
 				if new_index != index
 				{
 					index = new_index;
-					changes = Self::CHANGE_PROPAGATION_DISTANCE;
+					changes = Self::ERASE_PROPAGATION_DISTANCE;
 				}
 			}
 			{
@@ -438,7 +451,7 @@ where
 					if rdes != self[index].descendants[1]
 					{
 						self[index].descendants[1] = rdes;
-						changes = Self::CHANGE_PROPAGATION_DISTANCE;
+						changes = Self::ERASE_PROPAGATION_DISTANCE;
 					}
 					
 					let mut rrdes = self[rdes].descendants[1];
@@ -450,7 +463,7 @@ where
 						if rrdes != self[rdes].descendants[1]
 						{
 							self[rdes].descendants[1] = rrdes;
-							changes = Self::CHANGE_PROPAGATION_DISTANCE;
+							changes = Self::ERASE_PROPAGATION_DISTANCE;
 						}
 					}
 				}
@@ -461,7 +474,7 @@ where
 				if new_index != index
 				{
 					index = new_index;
-					changes = Self::CHANGE_PROPAGATION_DISTANCE;
+					changes = Self::ERASE_PROPAGATION_DISTANCE;
 				}
 			}
 			{
@@ -474,7 +487,7 @@ where
 					if rdes != self[index].descendants[1]
 					{
 						self[index].descendants[1] = rdes;
-						changes = Self::CHANGE_PROPAGATION_DISTANCE;
+						changes = Self::ERASE_PROPAGATION_DISTANCE;
 					}
 				}
 			}
