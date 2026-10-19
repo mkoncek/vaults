@@ -439,3 +439,128 @@ fn test_to_dot()
 	}
 }
 */
+
+/// Every insertion and removal on every valid tree up to a size.
+#[test]
+fn test_aa_set_exhaustive()
+{
+	const SIZE: usize = 24;
+	const MAX_LEVEL: usize = 4;
+	
+	enum Shape
+	{
+		Nil,
+		Node(i16, std::rc::Rc<Shape>, std::rc::Rc<Shape>),
+	}
+	
+	// shapes[level + 1][size]: all valid subtrees with the root at `level`
+	let mut shapes = vec![vec![Vec::<std::rc::Rc<Shape>>::new(); SIZE + 1]];
+	shapes[0][0].push(std::rc::Rc::new(Shape::Nil));
+	
+	for level in 0 ..= MAX_LEVEL
+	{
+		let below = &shapes[level];
+		let mut single = vec![Vec::new(); SIZE + 1];
+		
+		for left_size in 0 .. SIZE
+		{
+			for right_size in 0 .. SIZE - left_size
+			{
+				for left in &below[left_size]
+				{
+					for right in &below[right_size]
+					{
+						single[1 + left_size + right_size].push(std::rc::Rc::new(Shape::Node(level as i16, left.clone(), right.clone())));
+					}
+				}
+			}
+		}
+		
+		// The right child at the same level
+		let mut all = single.clone();
+		
+		for left_size in 0 .. SIZE
+		{
+			for right_size in 0 .. SIZE - left_size
+			{
+				for left in &below[left_size]
+				{
+					for right in &single[right_size]
+					{
+						all[1 + left_size + right_size].push(std::rc::Rc::new(Shape::Node(level as i16, left.clone(), right.clone())));
+					}
+				}
+			}
+		}
+		
+		shapes.push(all);
+	}
+	
+	fn link(index: usize) -> node::Link
+	{
+		if index == usize::MAX {node::Link::NIL} else {node::Link::new(index)}
+	}
+	
+	fn build(shape: &Shape, nodes: &mut Vec<node::Node<SetEntry<u32>>>, parent: usize, key: &mut u32) -> usize
+	{
+		match shape
+		{
+			Shape::Nil => usize::MAX,
+			Shape::Node(level, left, right) =>
+			{
+				let index = nodes.len();
+				nodes.push(node::Node::new(SetEntry(0)));
+				let left = build(left, nodes, index, key);
+				*key += 2;
+				*nodes[index].as_mut() = SetEntry(*key);
+				let right = build(right, nodes, index, key);
+				nodes[index].level = *level;
+				nodes[index].parent = link(parent);
+				nodes[index].descendants = [left, right].map(link);
+				index
+			}
+		}
+	}
+	
+	fn check(set: &VecSet<u32>, expected: &std::collections::BTreeSet<u32>)
+	{
+		assert_eq!(expected.len(), node::check_invariants(set.storage.nodes(), set.base.root));
+		assert!(expected.iter().eq(set.iter()));
+		assert!(expected.iter().rev().eq(set.iter().rev()));
+	}
+	
+	for size in 0 ..= SIZE
+	{
+		for shape in shapes.iter().flat_map(|shapes| &shapes[size])
+		{
+			let make = ||
+			{
+				let mut set = VecSet::<u32>::new();
+				let mut key = 0;
+				let root = build(shape, &mut set.storage, usize::MAX, &mut key);
+				set.base.root = link(root);
+				set.base.first = link(if size == 0 {usize::MAX} else {set.storage.iter().position(|n| n.as_ref().0 == 2).unwrap()});
+				set.base.last = link(if size == 0 {usize::MAX} else {set.storage.iter().position(|n| n.as_ref().0 == key).unwrap()});
+				let keys = (1 ..= size as u32).map(|k| 2 * k).collect::<std::collections::BTreeSet<_>>();
+				check(&set, &keys);
+				return (set, keys);
+			};
+			
+			for key in (0 ..= size as u32).map(|k| 2 * k + 1)
+			{
+				let (mut set, mut keys) = make();
+				assert!(set.insert(key));
+				keys.insert(key);
+				check(&set, &keys);
+			}
+			
+			for key in (1 ..= size as u32).map(|k| 2 * k)
+			{
+				let (mut set, mut keys) = make();
+				assert!(set.remove(&key));
+				keys.remove(&key);
+				check(&set, &keys);
+			}
+		}
+	}
+}
