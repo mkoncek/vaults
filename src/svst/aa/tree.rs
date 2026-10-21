@@ -258,7 +258,6 @@ where
 		{
 			self.root = node::AA::skew(nodes, self.root);
 			self.root = node::AA::split(nodes, self.root);
-			nodes[self.root].parent = node::Link::NIL;
 		}
 		
 		if nodes[self.first].descendants[0] == position || nodes[position].descendants[1] == self.first

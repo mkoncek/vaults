@@ -116,15 +116,7 @@ where
 {
 	fn get_parent_index(&self, index: Link<LinkType>, parent: Link<LinkType>) -> u8
 	{
-		for i in 0 .. 2
-		{
-			if self[parent].descendants[i as usize] == index
-			{
-				return i;
-			}
-		}
-		
-		unreachable!();
+		(self[parent].descendants[1] == index) as u8
 	}
 	
 	fn skew(&mut self, index: Link<LinkType>) -> Link<LinkType>
@@ -327,6 +319,8 @@ where
 			
 			changes -= 1;
 			
+			let original = index;
+			
 			let nv = self.skew(index);
 			
 			if nv != index
@@ -343,8 +337,10 @@ where
 				changes = Self::INSERT_PROPAGATION_DISTANCE;
 			}
 			
-			self[index].parent = parent;
-			self[parent].descendants[parent_index as usize] = index;
+			if index != original
+			{
+				self[parent].descendants[parent_index as usize] = index;
+			}
 		}
 		
 		return changes > 0;
@@ -384,12 +380,6 @@ where
 			changes -= 1;
 			index = parent;
 			parent = self[parent].parent;
-			let mut parent_index = 0;
-			
-			if parent != Link::NIL
-			{
-				parent_index = self.get_parent_index(index, parent);
-			}
 			
 			let mut level = -1;
 			
@@ -430,71 +420,69 @@ where
 				{
 					self[rdes].level = level;
 				}
-			}
-			
-			{
-				let new_index = self.skew(index);
 				
-				if new_index != index
-				{
-					index = new_index;
-					changes = Self::ERASE_PROPAGATION_DISTANCE;
-				}
-			}
-			{
-				let mut rdes = self[index].descendants[1];
+				let original = index;
 				
-				if rdes != Link::NIL
 				{
-					rdes = self.skew(rdes);
+					let new_index = self.skew(index);
 					
-					if rdes != self[index].descendants[1]
+					if new_index != index
 					{
-						self[index].descendants[1] = rdes;
-						changes = Self::ERASE_PROPAGATION_DISTANCE;
+						index = new_index;
 					}
+				}
+				{
+					let mut rdes = self[index].descendants[1];
 					
-					let mut rrdes = self[rdes].descendants[1];
-					
-					if rrdes != Link::NIL
+					if rdes != Link::NIL
 					{
-						rrdes = self.skew(rrdes);
+						rdes = self.skew(rdes);
 						
-						if rrdes != self[rdes].descendants[1]
+						if rdes != self[index].descendants[1]
 						{
-							self[rdes].descendants[1] = rrdes;
-							changes = Self::ERASE_PROPAGATION_DISTANCE;
+							self[index].descendants[1] = rdes;
+						}
+						
+						let mut rrdes = self[rdes].descendants[1];
+						
+						if rrdes != Link::NIL
+						{
+							rrdes = self.skew(rrdes);
+							
+							if rrdes != self[rdes].descendants[1]
+							{
+								self[rdes].descendants[1] = rrdes;
+							}
 						}
 					}
 				}
-			}
-			{
-				let new_index = self.split(index);
-				
-				if new_index != index
 				{
-					index = new_index;
-					changes = Self::ERASE_PROPAGATION_DISTANCE;
-				}
-			}
-			{
-				let mut rdes = self[index].descendants[1];
-				
-				if rdes != Link::NIL
-				{
-					rdes = self.split(rdes);
+					let new_index = self.split(index);
 					
-					if rdes != self[index].descendants[1]
+					if new_index != index
 					{
-						self[index].descendants[1] = rdes;
-						changes = Self::ERASE_PROPAGATION_DISTANCE;
+						index = new_index;
 					}
 				}
-			}
-			
-			if parent != Link::NIL
-			{
-				self[parent].descendants[parent_index as usize] = index;
+				{
+					let mut rdes = self[index].descendants[1];
+					
+					if rdes != Link::NIL
+					{
+						rdes = self.split(rdes);
+						
+						if rdes != self[index].descendants[1]
+						{
+							self[index].descendants[1] = rdes;
+						}
+					}
+				}
+				
+				if parent != Link::NIL && index != original
+				{
+					let parent_index = self.get_parent_index(original, parent);
+					self[parent].descendants[parent_index as usize] = index;
+				}
 			}
 			
 			if parent == Link::NIL || changes == 0
