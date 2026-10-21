@@ -7,17 +7,15 @@ use crate::svst::repository::Repository;
 /// therefore the slices returned by `nodes` and `nodes_mut` may contain dropped values at other indices.
 pub trait TreeStorage<Type>
 {
-	type LinkType: node::LinkIndex;
-	
 	fn len(&self) -> usize;
 	fn capacity(&self) -> usize;
 	fn clear(&mut self);
-	fn nodes(&self) -> &[node::Node<Type, Self::LinkType>];
-	fn nodes_mut(&mut self) -> &mut [node::Node<Type, Self::LinkType>];
+	fn nodes(&self) -> &[node::Node<Type>];
+	fn nodes_mut(&mut self) -> &mut [node::Node<Type>];
 	fn contains(&self, index: usize) -> bool;
 	
 	/// Inserts a node, the indices of the other nodes must not change.
-	fn push(&mut self, value: node::Node<Type, Self::LinkType>) -> usize;
+	fn push(&mut self, value: node::Node<Type>) -> usize;
 }
 
 /// Storage of tree nodes which supports removal.
@@ -29,7 +27,7 @@ pub trait RemovableTreeStorage<Type>: TreeStorage<Type>
 	/// Returns the removed node and the former index of the node which was moved to `index`, or `usize::MAX`.
 	///
 	/// Panics if there is no node at `index`.
-	fn remove(&mut self, index: usize) -> (node::Node<Type, Self::LinkType>, usize);
+	fn remove(&mut self, index: usize) -> (node::Node<Type>, usize);
 	
 	/// Returns a cursor for visiting the indices of all nodes.
 	/// Removal of the most recently visited index must not cause any node to be skipped.
@@ -37,32 +35,26 @@ pub trait RemovableTreeStorage<Type>: TreeStorage<Type>
 	fn advance(&self, cursor: &mut Self::Cursor) -> Option<usize>;
 }
 
-impl<Type, LinkType> TreeStorage<Type> for Repository<node::Node<Type, LinkType>>
-where
-	LinkType: node::LinkIndex,
+impl<Type> TreeStorage<Type> for Repository<node::Node<Type>>
 {
-	type LinkType = LinkType;
-	
 	fn len(&self) -> usize {Repository::len(self)}
 	fn capacity(&self) -> usize {Repository::capacity(self)}
 	fn clear(&mut self) {Repository::clear(self)}
-	fn nodes(&self) -> &[node::Node<Type, LinkType>] {unsafe {self.as_slice()}}
-	fn nodes_mut(&mut self) -> &mut [node::Node<Type, LinkType>] {unsafe {self.as_mut_slice()}}
+	fn nodes(&self) -> &[node::Node<Type>] {unsafe {self.as_slice()}}
+	fn nodes_mut(&mut self) -> &mut [node::Node<Type>] {unsafe {self.as_mut_slice()}}
 	fn contains(&self, index: usize) -> bool {self.get(index).is_some()}
 	
-	fn push(&mut self, value: node::Node<Type, LinkType>) -> usize
+	fn push(&mut self, value: node::Node<Type>) -> usize
 	{
 		self.insert(value)
 	}
 }
 
-impl<Type, LinkType> RemovableTreeStorage<Type> for Repository<node::Node<Type, LinkType>>
-where
-	LinkType: node::LinkIndex,
+impl<Type> RemovableTreeStorage<Type> for Repository<node::Node<Type>>
 {
 	type Cursor = bit_indexing::TransientIndexSliceIterator;
 	
-	fn remove(&mut self, index: usize) -> (node::Node<Type, LinkType>, usize)
+	fn remove(&mut self, index: usize) -> (node::Node<Type>, usize)
 	{
 		(Repository::remove(self, index).expect("no node at index"), usize::MAX)
 	}
@@ -78,20 +70,16 @@ where
 	}
 }
 
-impl<Type, LinkType> TreeStorage<Type> for Vec<node::Node<Type, LinkType>>
-where
-	LinkType: node::LinkIndex,
+impl<Type> TreeStorage<Type> for Vec<node::Node<Type>>
 {
-	type LinkType = LinkType;
-	
 	fn len(&self) -> usize {Vec::len(self)}
 	fn capacity(&self) -> usize {Vec::capacity(self)}
 	fn clear(&mut self) {Vec::clear(self)}
-	fn nodes(&self) -> &[node::Node<Type, LinkType>] {self.as_slice()}
-	fn nodes_mut(&mut self) -> &mut [node::Node<Type, LinkType>] {self.as_mut_slice()}
+	fn nodes(&self) -> &[node::Node<Type>] {self.as_slice()}
+	fn nodes_mut(&mut self) -> &mut [node::Node<Type>] {self.as_mut_slice()}
 	fn contains(&self, index: usize) -> bool {index < Vec::len(self)}
 	
-	fn push(&mut self, value: node::Node<Type, LinkType>) -> usize
+	fn push(&mut self, value: node::Node<Type>) -> usize
 	{
 		Vec::push(self, value);
 		Vec::len(self) - 1
@@ -99,14 +87,12 @@ where
 }
 
 /// Removal moves the last node into the place of the removed one.
-impl<Type, LinkType> RemovableTreeStorage<Type> for Vec<node::Node<Type, LinkType>>
-where
-	LinkType: node::LinkIndex,
+impl<Type> RemovableTreeStorage<Type> for Vec<node::Node<Type>>
 {
 	/// Visits the indices in descending order, so the node moved by a removal is one which was already visited.
 	type Cursor = usize;
 	
-	fn remove(&mut self, index: usize) -> (node::Node<Type, LinkType>, usize)
+	fn remove(&mut self, index: usize) -> (node::Node<Type>, usize)
 	{
 		let last = Vec::len(self) - 1;
 		(self.swap_remove(index), if index != last {last} else {usize::MAX})
@@ -128,16 +114,14 @@ where
 
 /// The bookkeeping of an AA tree, independent of the storage of its nodes.
 #[derive(Debug)]
-pub struct TreeBase<LinkType = usize>
+pub struct TreeBase
 {
-	pub root: node::Link<LinkType>,
-	pub first: node::Link<LinkType>,
-	pub last: node::Link<LinkType>,
+	pub root: node::Link,
+	pub first: node::Link,
+	pub last: node::Link,
 }
 
-impl<LinkType> TreeBase<LinkType>
-where
-	LinkType: node::LinkIndex,
+impl TreeBase
 {
 	pub const fn new() -> Self
 	{
@@ -157,10 +141,10 @@ where
 	}
 	
 	/// `compare` returns the ordering of a key in the tree relative to the searched one.
-	pub fn find<Type, Storage, Compare>(&self, storage: &Storage, mut compare: Compare) -> node::Link<LinkType>
+	pub fn find<Type, Storage, Compare>(&self, storage: &Storage, mut compare: Compare) -> node::Link
 	where
 		Type: node::Entry,
-		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + TreeStorage<Type>,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
 		node::AA::find(storage.nodes(), self.root, |key| compare(key).reverse()).0
@@ -169,7 +153,7 @@ where
 	pub fn get<'t, Type, Storage, Compare>(&self, storage: &'t Storage, compare: Compare) -> Option<&'t Type>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + TreeStorage<Type>,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
 		let index = self.find(storage, compare);
@@ -184,7 +168,7 @@ where
 	
 	pub fn first<'t, Type, Storage>(&self, storage: &'t Storage) -> Option<&'t Type>
 	where
-		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + TreeStorage<Type>,
 	{
 		if self.first != node::Link::NIL
 		{
@@ -198,7 +182,7 @@ where
 	
 	pub fn last<'t, Type, Storage>(&self, storage: &'t Storage) -> Option<&'t Type>
 	where
-		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + TreeStorage<Type>,
 	{
 		if self.last != node::Link::NIL
 		{
@@ -210,9 +194,9 @@ where
 		}
 	}
 	
-	pub fn iter<'t, Type, Storage>(&self, storage: &'t Storage) -> node::Iterator<&'t [node::Node<Type, LinkType>], LinkType>
+	pub fn iter<'t, Type, Storage>(&self, storage: &'t Storage) -> node::Iterator<&'t [node::Node<Type>]>
 	where
-		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + TreeStorage<Type>,
 	{
 		node::Iterator
 		{
@@ -230,11 +214,11 @@ where
 	pub fn try_insert<Type, Storage, Compare, Consumer, ResultType>(&mut self, storage: &mut Storage, value: Type, mut compare: Compare, consumer: Consumer) -> ResultType
 	where
 		Type: node::Entry,
-		Storage: ?Sized + TreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + TreeStorage<Type>,
 		Compare: FnMut(&Type::Key, &Type::Key) -> std::cmp::Ordering,
 		Consumer: std::ops::FnOnce(Option<(&mut Type, Type)>) -> ResultType,
 	{
-		assert!(storage.len() < LinkType::MAX_LEN, "the number of nodes exceeds {}", LinkType::MAX_LEN);
+		assert!(storage.len() < usize::MAX, "the number of nodes exceeds {}", usize::MAX);
 		
 		if self.is_empty()
 		{
@@ -276,7 +260,7 @@ where
 	pub fn remove_at<Type, Storage>(&mut self, storage: &mut Storage, position: usize) -> Option<Type::Value>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + RemovableTreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + RemovableTreeStorage<Type>,
 	{
 		if ! storage.contains(position)
 		{
@@ -342,7 +326,7 @@ where
 	pub fn pop_first<Type, Storage>(&mut self, storage: &mut Storage) -> Option<Type::Value>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + RemovableTreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + RemovableTreeStorage<Type>,
 	{
 		self.remove_at(storage, self.first.index())
 	}
@@ -350,15 +334,13 @@ where
 	pub fn pop_last<Type, Storage>(&mut self, storage: &mut Storage) -> Option<Type::Value>
 	where
 		Type: node::Entry,
-		Storage: ?Sized + RemovableTreeStorage<Type, LinkType = LinkType>,
+		Storage: ?Sized + RemovableTreeStorage<Type>,
 	{
 		self.remove_at(storage, self.last.index())
 	}
 }
 
-impl<LinkType> Default for TreeBase<LinkType>
-where
-	LinkType: node::LinkIndex,
+impl Default for TreeBase
 {
 	fn default() -> Self {Self::new()}
 }
@@ -369,14 +351,12 @@ pub struct Tree<Type, Storage = Repository<node::Node<Type>>>
 where
 	Storage: TreeStorage<Type>,
 {
-	pub(super) base: TreeBase<Storage::LinkType>,
+	pub(super) base: TreeBase,
 	pub(super) storage: Storage,
 	_data: std::marker::PhantomData<Type>,
 }
 
-impl<Type, LinkType> Tree<Type, Repository<node::Node<Type, LinkType>>>
-where
-	LinkType: node::LinkIndex,
+impl<Type> Tree<Type, Repository<node::Node<Type>>>
 {
 	pub const fn new() -> Self
 	{
@@ -399,9 +379,7 @@ where
 	}
 }
 
-impl<Type, LinkType> Tree<Type, Vec<node::Node<Type, LinkType>>>
-where
-	LinkType: node::LinkIndex,
+impl<Type> Tree<Type, Vec<node::Node<Type>>>
 {
 	pub const fn new() -> Self
 	{
@@ -452,7 +430,7 @@ where
 		self.base.try_insert(&mut self.storage, value, compare, consumer)
 	}
 	
-	pub(super) fn impl_find<Compare>(&self, compare: Compare) -> node::Link<Storage::LinkType>
+	pub(super) fn impl_find<Compare>(&self, compare: Compare) -> node::Link
 	where
 		Type: node::Entry,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
@@ -530,7 +508,7 @@ where
 	pub(super) fn impl_first(&self) -> Option<&Type> {self.base.first(&self.storage)}
 	pub(super) fn impl_last(&self) -> Option<&Type> {self.base.last(&self.storage)}
 	
-	pub(super) fn impl_iter(&self) -> node::Iterator<&[node::Node<Type, Storage::LinkType>], Storage::LinkType>
+	pub(super) fn impl_iter(&self) -> node::Iterator<&[node::Node<Type>]>
 	{
 		self.base.iter(&self.storage)
 	}
@@ -595,7 +573,7 @@ impl<Type, Storage> Tree<Type, Storage>
 where
 	Storage: TreeStorage<Type>,
 {
-	fn to_dot_node(&self, index: node::Link<Storage::LinkType>, writer: &mut impl std::io::Write) -> std::io::Result<()>
+	fn to_dot_node(&self, index: node::Link, writer: &mut impl std::io::Write) -> std::io::Result<()>
 	{
 		writeln!(writer, "node{} [shape=record];", index.index())?;
 		

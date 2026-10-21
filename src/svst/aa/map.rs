@@ -13,8 +13,8 @@ impl<KeyType, MappedType> node::Entry for MapEntry<KeyType, MappedType>
 	fn value(self) -> Self::Value {(self.0, self.1)}
 }
 
-pub type Map<KeyType, MappedType, LinkType = usize> = aa::tree::Tree<MapEntry<KeyType, MappedType>, crate::svst::Repository<node::Node<MapEntry<KeyType, MappedType>, LinkType>>>;
-pub type VecMap<KeyType, MappedType, LinkType = usize> = aa::tree::Tree<MapEntry<KeyType, MappedType>, Vec<node::Node<MapEntry<KeyType, MappedType>, LinkType>>>;
+pub type Map<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>, crate::svst::Repository<node::Node<MapEntry<KeyType, MappedType>>>>;
+pub type VecMap<KeyType, MappedType> = aa::tree::Tree<MapEntry<KeyType, MappedType>, Vec<node::Node<MapEntry<KeyType, MappedType>>>>;
 
 impl<KeyType, MappedType, Storage> aa::tree::Tree<MapEntry<KeyType, MappedType>, Storage>
 where
