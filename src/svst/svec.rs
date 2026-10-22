@@ -6,6 +6,8 @@ union Variant<Type, const SIZE: usize>
 	vector: std::mem::ManuallyDrop<Vec<Type>>,
 }
 
+/// A small-vector: stores up to `SIZE` elements inline without heap allocation,
+/// then transparently spills to a [`Vec`].
 pub struct SVec<Type, const SIZE: usize>
 {
 	size: u32,

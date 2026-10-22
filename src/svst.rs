@@ -1,4 +1,7 @@
-//! Single vector-storage collections.
+//! Collections backed by contiguous storage.
+//!
+//! All structures in this module store their elements in flat arrays rather than
+//! pointer-linked nodes, improving cache locality and reducing allocation overhead.
 
 pub mod aa;
 pub mod svec;

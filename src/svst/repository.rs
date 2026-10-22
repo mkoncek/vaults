@@ -2,15 +2,17 @@ use crate::svst::vector_storage::VectorStorage;
 use crate::svst::bit_indexing;
 #[cfg(test)] use rand::seq::SliceRandom;
 
-/// A data structure holding values of type `Type`.
-/// It is backed by vector-like storage and grows dynamically, similar to [Vec].
-/// 
-/// The difference is that the removal of values from this structure does not cause shifting of the subsequent values to fill the empty space.
-/// Therefore after removing values from anywhere but the end, this structure will have "holes".
-/// Repository keeps track of these holes and they will be filled on subsequent `insert` operations.
-/// 
-/// The metadata is stored as a perfectly balanced tree of 128-bit bitsets which are stored together with the storage allocated for the values.
-/// This means that despite the `insert` and `remove` operations being _O(log n)_, the logarithm has a base of 128 and the tree is extremely flat.
+/// A sparse, index-stable container backed by a flat array.
+///
+/// Unlike [`Vec`], removing a value does not shift subsequent elements.
+/// Instead the vacated slot becomes a hole which is reused by the next [`insert`](Self::insert).
+/// This means that the index returned by `insert` remains valid until the value at
+/// that index is explicitly removed -- insertions and removals of *other* values never
+/// invalidate it.
+///
+/// Occupancy is tracked by a tree of 128-bit bitsets stored in the same allocation as
+/// the values.  `insert` and `remove` are amortized *O*(log_{128} *n*), which is
+/// at most 3 levels for 2 million elements and at most 9 levels for any `usize` range.
 #[derive(Debug)]
 pub struct Repository<Type>
 {

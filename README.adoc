@@ -1,3 +1,53 @@
 = Vaults
 
 Specialized collections for Rust.
+
+== Collections
+
+=== Repository
+
+A sparse, index-stable container backed by a flat array.
+Values are accessed by index and their indices remain valid for the lifetime of the container (or until explicitly removed).
+Removal does not shift elements; instead the vacant slot is tracked and reused by the next insertion.
+
+Occupancy metadata is stored as a tree of 128-bit bitsets alongside the values in a single allocation, making `insert` and `remove` amortized _O(log~128~ n)_ -- effectively constant for practical sizes.
+
+=== SVec
+
+A small-vector optimization: stores up to `SIZE` elements inline without allocating, then spills to a heap-allocated `Vec`.
+
+=== AA tree collections
+
+Sorted set and map collections built on an https://en.wikipedia.org/wiki/AA_tree[AA tree] (Andersson tree).
+Each comes in two storage variants:
+
+[cols="1,1,2"]
+|===
+| Type | Storage | Index stability
+
+| `AATreeSet` / `AATreeMap`
+| `Repository`
+| Stable -- node indices never change after insertion.
+
+| `AAVecSet` / `AAVecMap`
+| `Vec`
+| Unstable -- removal uses `swap_remove`, which moves the last node into the vacated slot.
+|===
+
+The `Repository`-backed variants are suitable when external code holds indices (handles) into the tree, because insertions and removals of other elements do not invalidate existing indices.
+The `Vec`-backed variants use less memory per node and have better cache locality, but do not provide stable indices.
+
+All variants support custom comparators via `_by` methods, sorted iteration, and `O(log n)` insert / remove / lookup.
+
+== Building
+
+[source,bash]
+----
+cargo build
+cargo test
+cargo bench       # criterion benchmarks
+----
+
+== License
+
+See `LICENSE`.

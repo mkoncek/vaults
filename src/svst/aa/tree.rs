@@ -2,9 +2,12 @@ use crate::svst::aa::node;
 use crate::svst::bit_indexing;
 use crate::svst::repository::Repository;
 
-/// Storage of tree nodes.
-/// The tree only follows links between nodes which are present in the storage,
-/// therefore the slices returned by `nodes` and `nodes_mut` may contain dropped values at other indices.
+/// Storage backend for tree nodes.
+///
+/// Implementations must keep existing node indices valid across [`push`](Self::push) calls --
+/// inserting a new node must not move previously stored nodes.
+/// The slices returned by [`nodes`](Self::nodes) may contain uninitialized slots at
+/// indices that are not occupied by the tree.
 pub trait TreeStorage<Type>
 {
 	fn len(&self) -> usize;
@@ -86,7 +89,8 @@ impl<Type> TreeStorage<Type> for Vec<node::Node<Type>>
 	}
 }
 
-/// Removal moves the last node into the place of the removed one.
+/// Removal uses `swap_remove`: the last node is moved into the vacated slot,
+/// so its index changes.  The tree updates its internal links accordingly.
 impl<Type> RemovableTreeStorage<Type> for Vec<node::Node<Type>>
 {
 	/// Visits the indices in descending order, so the node moved by a removal is one which was already visited.

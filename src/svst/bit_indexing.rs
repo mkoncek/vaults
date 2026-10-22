@@ -1,3 +1,9 @@
+//! Hierarchical bitset index used by [`Repository`](super::Repository) to track occupied slots.
+//!
+//! The index is a tree of 128-bit words.  Each bit in a non-leaf word summarizes whether the
+//! corresponding child word is fully occupied.  This lets `push_front` (find-first-free) and
+//! `erase` run in *O*(depth) steps, where the depth is at most `ceil(log_{128}(capacity))`.
+
 pub type IndexType = u128;
 
 pub(super) const fn indices(index: usize) -> (usize, IndexType)
