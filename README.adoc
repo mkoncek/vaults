@@ -12,11 +12,6 @@ Removal does not shift elements; instead the vacant slot is tracked and reused b
 
 Occupancy metadata is stored as a tree of 128-bit bitsets alongside the values in a single allocation, making `insert` and `remove` amortized _O(log~128~ n)_ -- effectively constant for practical sizes.
 
-=== SVec
-
-A small-vector optimization: stores up to `SIZE` elements inline without allocating, then transparently spills to a heap-allocated `Vec`.
-Unlike fixed-capacity alternatives such as https://docs.rs/staticvec[`staticvec`], SVec can grow beyond its inline limit without panicking.
-
 === AA tree collections
 
 Sorted set and map collections built on an https://en.wikipedia.org/wiki/AA_tree[AA tree] (Andersson tree).
