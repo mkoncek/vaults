@@ -12,11 +12,10 @@ debug = true
 [profile.bench]
 debug = true
 
-[[bin]]
-name = "bench"
-path = "src/bench.rs"
-
 [dev-dependencies]
 rand = "0.10"
+criterion = "0.8"
 
-[dependencies]
+[[bench]]
+name = "aa_tree"
+harness = false
