@@ -14,7 +14,8 @@ Occupancy metadata is stored as a tree of 128-bit bitsets alongside the values i
 
 === SVec
 
-A small-vector optimization: stores up to `SIZE` elements inline without allocating, then spills to a heap-allocated `Vec`.
+A small-vector optimization: stores up to `SIZE` elements inline without allocating, then transparently spills to a heap-allocated `Vec`.
+Unlike fixed-capacity alternatives such as https://docs.rs/staticvec[`staticvec`], SVec can grow beyond its inline limit without panicking.
 
 === AA tree collections
 
@@ -31,11 +32,11 @@ Each comes in two storage variants:
 
 | `AAVecSet` / `AAVecMap`
 | `Vec`
-| Unstable -- removal uses `swap_remove`, which moves the last node into the vacated slot.
+| Stable across insertions -- indices do not change when new elements are added.  Removal uses `swap_remove`, which moves the last node into the vacated slot, so indices may be invalidated by removals.
 |===
 
 The `Repository`-backed variants are suitable when external code holds indices (handles) into the tree, because insertions and removals of other elements do not invalidate existing indices.
-The `Vec`-backed variants use less memory per node and have better cache locality, but do not provide stable indices.
+The `Vec`-backed variants use less memory per node and have better cache locality; their indices are stable as long as no elements are removed.
 
 All variants support custom comparators via `_by` methods, sorted iteration, and `O(log n)` insert / remove / lookup.
 
