@@ -14,7 +14,7 @@ jobs:
     - name: Install dependencies
       run: sudo apt install cargo valgrind
     - name: Checkout sources
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
     - name: Build
       run: cargo build --target x86_64-unknown-linux-gnu
     - name: Test
