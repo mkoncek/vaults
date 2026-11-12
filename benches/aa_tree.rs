@@ -157,10 +157,12 @@ fn bench_set_iter(c: &mut Criterion)
 		for v in &values {s.insert(*v);}
 		group.bench_function("AATreeSet", |b| b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
 		group.bench_function("AATreeSet_collect", |b| b.iter(|| s.iter().copied().collect::<Vec<_>>()));
+		group.bench_function("AATreeSet_unordered", |b| b.iter(|| s.iter_unordered().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
 		
 		let mut s = AAVecSet::new();
 		for v in &values {s.insert(*v);}
 		group.bench_function("AAVecSet", |b| b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
+		group.bench_function("AAVecSet_unordered", |b| b.iter(|| s.iter_unordered().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
 		
 		let s: std::collections::BTreeSet<usize> = values.iter().copied().collect();
 		group.bench_function("BTreeSet", |b| b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));

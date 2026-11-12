@@ -65,6 +65,22 @@ where
 		self.impl_iter()
 	}
 	
+	/// Returns an iterator over the values in the order of the storage instead of their order.
+	///
+	/// It reads the storage sequentially instead of following the links of the tree,
+	/// which is much faster for large sets whose values were not inserted in their order.
+	pub fn iter_unordered(&self) -> impl ExactSizeIterator<Item = &KeyType> + std::iter::FusedIterator
+	{
+		self.impl_iter_unordered().map(|(_, entry)| &entry.0)
+	}
+	
+	/// Like [`iter_unordered`](Self::iter_unordered), but also returns the position of each value,
+	/// as used by [`remove_at`](Self::remove_at).
+	pub fn iter_positions(&self) -> impl ExactSizeIterator<Item = (usize, &KeyType)> + std::iter::FusedIterator
+	{
+		self.impl_iter_unordered().map(|(position, entry)| (position, &entry.0))
+	}
+	
 	pub fn contains<Key>(&self, key: &Key) -> bool
 	where
 		KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
@@ -347,6 +363,50 @@ fn test_aa_set_clone()
 }
 
 #[test]
+fn test_aa_set_iter_unordered()
+{
+	fn check<Storage>(mut set: aa::tree::Tree<SetEntry<u32>, Storage>)
+	where
+		Storage: RemovableTreeStorage<SetEntry<u32>>,
+	{
+		assert_eq!(None, set.iter_unordered().next());
+		
+		// With vacant slots in the storage, if it keeps them
+		for i in 0 .. 1000
+		{
+			set.insert(i * 7 % 1000);
+		}
+		
+		set.retain(|i| i % 3 != 0);
+		let it = set.iter_unordered();
+		assert_eq!(set.len(), it.len());
+		let mut values = it.copied().collect::<Vec<_>>();
+		values.sort();
+		assert!(set.iter().copied().eq(values));
+		
+		// The positions refer to the values
+		let positions = set.iter_positions().map(|(position, &value)| (position, value)).collect::<Vec<_>>();
+		assert_eq!(set.len(), positions.len());
+		assert!(positions.iter().all(|&(position, value)| unsafe {*set.get_at_unchecked(position)} == value));
+		
+		// In descending order, since removal from a vector moves the last node to the removed position
+		let mut removed = positions.into_iter().filter(|(_, value)| value % 2 == 0).collect::<Vec<_>>();
+		removed.sort_by(|lhs, rhs| rhs.cmp(lhs));
+		
+		for (position, value) in removed
+		{
+			assert_eq!(Some(value), set.remove_at(position));
+		}
+		
+		assert!(set.iter_unordered().all(|value| value % 2 != 0));
+		assert_eq!(set.len(), set.iter_unordered().count());
+	}
+	
+	check(Set::<u32>::new());
+	check(VecSet::<u32>::new());
+}
+
+#[test]
 fn test_aa_set_retain()
 {
 	let mut set = Set::<i32>::new();
@@ -482,6 +542,9 @@ where
 		{
 			assert!(reference.iter().eq(set.iter()));
 			assert!(reference.iter().rev().eq(set.iter().rev()));
+			let mut unordered = set.iter_unordered().copied().collect::<Vec<_>>();
+			unordered.sort();
+			assert!(reference.iter().eq(unordered.iter()));
 		}
 	}
 	

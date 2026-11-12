@@ -29,6 +29,22 @@ where
 		self.impl_iter()
 	}
 	
+	/// Returns an iterator over the entries in the order of the storage instead of the order of their keys.
+	///
+	/// It reads the storage sequentially instead of following the links of the tree,
+	/// which is much faster for large maps whose keys were not inserted in their order.
+	pub fn iter_unordered(&self) -> impl ExactSizeIterator<Item = (&KeyType, &MappedType)> + std::iter::FusedIterator
+	{
+		self.impl_iter_unordered().map(|(_, entry)| (&entry.0, &entry.1))
+	}
+	
+	/// Like [`iter_unordered`](Self::iter_unordered), but also returns the position of each entry,
+	/// as used by [`remove_at`](Self::remove_at).
+	pub fn iter_positions(&self) -> impl ExactSizeIterator<Item = (usize, &KeyType, &MappedType)> + std::iter::FusedIterator
+	{
+		self.impl_iter_unordered().map(|(position, entry)| (position, &entry.0, &entry.1))
+	}
+	
 	/// Like [`contains_key`](Self::contains_key), but searches using `compare`,
 	/// which returns the ordering of a key in the map relative to the searched one.
 	/// 
@@ -288,6 +304,7 @@ fn test_aa_map_iter()
 	{
 		let mut reference = std::collections::BTreeMap::new();
 		assert_eq!(None, map.iter().next());
+		assert_eq!(None, map.iter_unordered().next());
 		
 		for i in 0 .. 500
 		{
@@ -304,6 +321,14 @@ fn test_aa_map_iter()
 		assert!(reference.iter().eq(&map));
 		assert_eq!(reference.len(), map.iter().len());
 		assert_eq!(reference.last_key_value(), map.iter().last());
+		
+		let mut unordered = map.iter_unordered().collect::<Vec<_>>();
+		assert_eq!(reference.len(), map.iter_unordered().len());
+		unordered.sort();
+		assert!(reference.iter().eq(unordered));
+		
+		assert_eq!(reference.len(), map.iter_positions().len());
+		assert!(map.iter_positions().all(|(position, key, value)| unsafe {map.get_key_value_at_unchecked(position)} == (key, value)));
 	}
 	
 	check(Map::new());

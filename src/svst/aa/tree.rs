@@ -19,6 +19,12 @@ pub trait TreeStorage<Type>
 	
 	/// Inserts a node, the indices of the other nodes must not change.
 	fn push(&mut self, value: node::Node<Type>) -> usize;
+	
+	/// The indices of all nodes in the order of the storage.
+	type Positions<'t>: std::iter::Iterator<Item = usize> where Self: 't;
+	
+	/// Returns the indices of all nodes in the order of the storage, which is the fastest order to visit them.
+	fn positions(&self) -> Self::Positions<'_>;
 }
 
 /// Storage of tree nodes which supports removal.
@@ -54,6 +60,13 @@ impl<Type> TreeStorage<Type> for Repository<node::Node<Type>>
 	fn push(&mut self, value: node::Node<Type>) -> usize
 	{
 		self.insert(value)
+	}
+	
+	type Positions<'t> = bit_indexing::IndexSliceIterator<'t> where Self: 't;
+	
+	fn positions(&self) -> Self::Positions<'_>
+	{
+		bit_indexing::IndexSliceIterator::new(self.index_header_leaf())
 	}
 }
 
@@ -91,6 +104,13 @@ impl<Type> TreeStorage<Type> for Vec<node::Node<Type>>
 	{
 		Vec::push(self, value);
 		Vec::len(self) - 1
+	}
+	
+	type Positions<'t> = std::ops::Range<usize> where Self: 't;
+	
+	fn positions(&self) -> Self::Positions<'_>
+	{
+		0 .. Vec::len(self)
 	}
 }
 
@@ -546,6 +566,62 @@ where
 	{
 		self.base.iter(&self.storage)
 	}
+	
+	pub(super) fn impl_iter_unordered(&self) -> Unordered<'_, Type, Storage::Positions<'_>>
+	{
+		Unordered
+		{
+			nodes: self.storage.nodes(),
+			positions: self.storage.positions(),
+			remaining: self.storage.len(),
+		}
+	}
+}
+
+/// An iterator over the positions and values of a tree in the order of its storage.
+pub struct Unordered<'t, Type, Positions>
+{
+	nodes: &'t [node::Node<Type>],
+	positions: Positions,
+	remaining: usize,
+}
+
+impl<'t, Type, Positions> std::iter::Iterator for Unordered<'t, Type, Positions>
+where
+	Positions: std::iter::Iterator<Item = usize>,
+{
+	type Item = (usize, &'t Type);
+	
+	#[inline]
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		if self.remaining == 0
+		{
+			return None;
+		}
+		
+		self.remaining -= 1;
+		let position = self.positions.next()?;
+		return Some((position, self.nodes[position].as_ref()));
+	}
+	
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		(self.remaining, Some(self.remaining))
+	}
+}
+
+impl<'t, Type, Positions> std::iter::ExactSizeIterator for Unordered<'t, Type, Positions>
+where
+	Positions: std::iter::Iterator<Item = usize>,
+{
+}
+
+impl<'t, Type, Positions> std::iter::FusedIterator for Unordered<'t, Type, Positions>
+where
+	Positions: std::iter::Iterator<Item = usize>,
+{
 }
 
 impl<Type, Storage> Tree<Type, Storage>
