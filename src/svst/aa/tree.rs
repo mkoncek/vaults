@@ -117,8 +117,11 @@ impl<Type> RemovableTreeStorage<Type> for Vec<node::Node<Type>>
 }
 
 /// The bookkeeping of an AA tree, independent of the storage of its nodes.
+///
+/// It is private, since its links are only meaningful for the storage of the tree.
+/// Storage cannot be implemented outside of the crate anyway, since the nodes are private.
 #[derive(Debug)]
-pub struct TreeBase
+pub(super) struct TreeBase
 {
 	pub root: node::Link,
 	pub first: node::Link,
