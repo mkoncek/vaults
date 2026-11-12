@@ -77,6 +77,7 @@ impl<Type> Repository<Type>
 	
 	/// Returns a slice containing the values of the repository.
 	/// Note that the slice may contain dropped values.
+	#[inline]
 	pub unsafe fn as_slice(&self) -> &[Type]
 	{
 		std::slice::from_raw_parts(self.storage.data.as_ptr()
@@ -86,6 +87,7 @@ impl<Type> Repository<Type>
 	
 	/// Returns a mutable slice containing the values of the repository.
 	/// Note that the slice may contain dropped values.
+	#[inline]
 	pub unsafe fn as_mut_slice(&mut self) -> &mut [Type]
 	{
 		std::slice::from_raw_parts_mut(self.storage.data.as_ptr()
@@ -97,6 +99,7 @@ impl<Type> Repository<Type>
 	/// The inserted value will remain at the position of the returned index for the whole lifetime of the repository or until the value is explicitly removed.
 	/// # Time complexity
 	/// Amortized _O(log<sub>128</sub> n)_ where _n_ is the number of values in the repository.
+	#[inline]
 	pub fn insert(&mut self, value: Type) -> usize
 	{
 		self.reserve(1);
@@ -118,6 +121,7 @@ impl<Type> Repository<Type>
 	/// Removes a value at _index_ from the repository, returning it or [None].
 	/// # Time complexity
 	/// _O(log<sub>128</sub> n)_ where _n_ is the number of values in the repository.
+	#[inline]
 	pub fn remove(&mut self, index: usize) -> Option<Type>
 	{
 		let capacity = self.capacity();
@@ -141,6 +145,7 @@ impl<Type> Repository<Type>
 	/// Removes a value at _index_ from the repository, returning it.
 	/// # Time complexity
 	/// _O(log<sub>128</sub> n)_ where _n_ is the number of values in the repository.
+	#[inline]
 	pub unsafe fn remove_unchecked(&mut self, index: usize) -> Type
 	{
 		let capacity = self.capacity();
@@ -188,6 +193,7 @@ impl<Type> Repository<Type>
 		self.as_mut_slice().get_unchecked_mut(index)
 	}
 	
+	#[inline]
 	pub fn get(&self, index: usize) -> Option<&Type>
 	{
 		if index < self.capacity()
@@ -205,6 +211,7 @@ impl<Type> Repository<Type>
 		return None;
 	}
 	
+	#[inline]
 	pub fn get_mut(&mut self, index: usize) -> Option<&mut Type>
 	{
 		if index < self.capacity()
@@ -276,6 +283,7 @@ impl<Type> Repository<Type>
 		return (layout, index_length);
 	}
 	
+	#[inline]
 	fn index_header(&self) -> &[bit_indexing::IndexType]
 	{
 		unsafe {std::slice::from_raw_parts(
@@ -283,6 +291,7 @@ impl<Type> Repository<Type>
 		)}
 	}
 	
+	#[inline]
 	fn index_header_mut(&mut self) -> &mut [bit_indexing::IndexType]
 	{
 		unsafe {std::slice::from_raw_parts_mut(
@@ -290,6 +299,7 @@ impl<Type> Repository<Type>
 		)}
 	}
 	
+	#[inline]
 	pub(super) fn index_header_leaf(&self) -> &[bit_indexing::IndexType]
 	{
 		&self.index_header()[self.index_length - bit_indexing::level_length(self.capacity()) .. self.index_length]

@@ -43,10 +43,14 @@ impl<Type> TreeStorage<Type> for Repository<node::Node<Type>>
 	fn len(&self) -> usize {Repository::len(self)}
 	fn capacity(&self) -> usize {Repository::capacity(self)}
 	fn clear(&mut self) {Repository::clear(self)}
+	#[inline]
 	fn nodes(&self) -> &[node::Node<Type>] {unsafe {self.as_slice()}}
+	#[inline]
 	fn nodes_mut(&mut self) -> &mut [node::Node<Type>] {unsafe {self.as_mut_slice()}}
+	#[inline]
 	fn contains(&self, index: usize) -> bool {self.get(index).is_some()}
 	
+	#[inline]
 	fn push(&mut self, value: node::Node<Type>) -> usize
 	{
 		self.insert(value)
@@ -57,6 +61,7 @@ impl<Type> RemovableTreeStorage<Type> for Repository<node::Node<Type>>
 {
 	type Cursor = bit_indexing::TransientIndexSliceIterator;
 	
+	#[inline]
 	fn remove(&mut self, index: usize) -> (node::Node<Type>, usize)
 	{
 		(Repository::remove(self, index).expect("no node at index"), usize::MAX)
