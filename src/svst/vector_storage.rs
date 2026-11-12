@@ -16,9 +16,10 @@ impl VectorStorage
 		}
 	}
 	
+	/// Saturates, the allocation fails for such capacity anyway.
 	pub fn default_capacity_growth(capacity: usize) -> usize
 	{
-		8 + capacity + (capacity + 1) / 2
+		capacity.saturating_add(capacity.div_ceil(2)).saturating_add(8)
 	}
 	
 	pub fn default_capacity_for(mut start: usize, capacity: usize) -> usize

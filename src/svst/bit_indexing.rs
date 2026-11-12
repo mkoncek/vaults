@@ -170,11 +170,9 @@ fn test_index_slice_iterator()
 }
 
 #[inline]
-pub const fn level_length(mut size: usize) -> usize
+pub const fn level_length(size: usize) -> usize
 {
-	size += IndexType::BITS as usize - 1;
-	size /= IndexType::BITS as usize;
-	return size;
+	size.div_ceil(IndexType::BITS as usize)
 }
 
 #[test]

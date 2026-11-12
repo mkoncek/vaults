@@ -257,6 +257,8 @@ impl<Type> Repository<Type>
 		;
 	}
 	
+	/// Returns the layout of the allocation for `capacity` values and the length of its index.
+	/// Panics if the size overflows.
 	fn layout_for(capacity: usize) -> (std::alloc::Layout, usize)
 	{
 		let alignment = std::cmp::max(
@@ -264,9 +266,14 @@ impl<Type> Repository<Type>
 			std::mem::align_of::<bit_indexing::IndexType>(),
 		);
 		let index_length = crate::svst::bit_indexing::index_length(capacity);
-		let byte_size = Self::array_offset(index_length) + std::mem::size_of::<Type>() * capacity;
+		// The index has at most `capacity / 127 + 10` words, so its size and the offset of the values do not overflow
+		let byte_size = std::mem::size_of::<Type>().checked_mul(capacity)
+			.and_then(|size| size.checked_add(Self::array_offset(index_length)))
+			.expect("capacity overflow")
+		;
+		let layout = std::alloc::Layout::from_size_align(byte_size, alignment).expect("capacity overflow");
 		
-		return (std::alloc::Layout::from_size_align(byte_size, alignment).unwrap(), index_length);
+		return (layout, index_length);
 	}
 	
 	fn index_header(&self) -> &[bit_indexing::IndexType]
@@ -697,6 +704,30 @@ fn test_growth()
 	assert_eq!(VectorStorage::default_capacity_growth(capacity) + 5, r.capacity());
 	assert!((990 .. 1000).all(|i| r[i] == i));
 	assert_eq!(10, r.len());
+}
+
+#[test]
+#[should_panic(expected = "capacity overflow")]
+fn test_capacity_overflow_with_capacity()
+{
+	Repository::<u64>::with_capacity(usize::MAX);
+}
+
+#[test]
+#[should_panic(expected = "capacity overflow")]
+fn test_capacity_overflow_byte_size()
+{
+	// The byte size of the values wraps around to 0 without the check
+	Repository::<[u8; 1 << 20]>::new().reserve_exact(1 << 44);
+}
+
+#[test]
+#[should_panic(expected = "capacity overflow")]
+fn test_capacity_overflow_additional()
+{
+	let mut r = Repository::new();
+	r.insert(0);
+	r.reserve(usize::MAX);
 }
 
 #[test]
