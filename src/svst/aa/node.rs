@@ -39,6 +39,57 @@ impl<Type> std::ops::IndexMut<Link> for [Node<Type>]
 	fn index_mut(&mut self, index: Link) -> &mut Self::Output {&mut self[index.index()]}
 }
 
+/// A view of the nodes of a tree which is indexed by links without bounds checks,
+/// the bounds are checked only in debug builds.
+/// 
+/// The tree operations keep every link which is not `Link::NIL` pointing to a node of the tree in its storage,
+/// whose index is within [`TreeStorage::nodes`](super::tree::TreeStorage::nodes),
+/// and they never follow `Link::NIL`.
+#[repr(transparent)]
+pub(super) struct Nodes<Type>([Node<Type>]);
+
+impl<Type> Nodes<Type>
+{
+	/// # Safety
+	/// Every link the result is indexed with must be lower than the length of `nodes`.
+	#[inline]
+	pub(super) unsafe fn new(nodes: &[Node<Type>]) -> &Self
+	{
+		// Sound, since the type is a transparent wrapper of the slice
+		unsafe {&*(nodes as *const [Node<Type>] as *const Self)}
+	}
+	
+	/// # Safety
+	/// Every link the result is indexed with must be lower than the length of `nodes`.
+	#[inline]
+	pub(super) unsafe fn new_mut(nodes: &mut [Node<Type>]) -> &mut Self
+	{
+		unsafe {&mut *(nodes as *mut [Node<Type>] as *mut Self)}
+	}
+}
+
+impl<Type> std::ops::Index<Link> for Nodes<Type>
+{
+	type Output = Node<Type>;
+	
+	#[inline]
+	fn index(&self, index: Link) -> &Self::Output
+	{
+		debug_assert!(index.index() < self.0.len(), "link {} out of {} nodes", index.index(), self.0.len());
+		unsafe {self.0.get_unchecked(index.index())}
+	}
+}
+
+impl<Type> std::ops::IndexMut<Link> for Nodes<Type>
+{
+	#[inline]
+	fn index_mut(&mut self, index: Link) -> &mut Self::Output
+	{
+		debug_assert!(index.index() < self.0.len(), "link {} out of {} nodes", index.index(), self.0.len());
+		unsafe {self.0.get_unchecked_mut(index.index())}
+	}
+}
+
 impl<Type> AsRef<Type> for Node<Type>
 {
 	fn as_ref(&self) -> &Type {&self.value}
@@ -561,7 +612,9 @@ impl<'t, Type> Iterator<&'t [Node<Type>]>
 		// in which case it exists, so the climb below stops before passing the root
 		if self.remaining != 0
 		{
-			let nodes = self.nodes;
+			// Sound, since the iterator is created over the nodes of a tree starting at its first and last nodes,
+			// and the neighbors of nodes are nodes of the tree as well
+			let nodes = unsafe {Nodes::new(self.nodes)};
 			let mut index = result;
 			let desc = nodes[index].descendants[1 - SIDE];
 			

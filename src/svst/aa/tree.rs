@@ -154,7 +154,9 @@ impl TreeBase
 		Storage: ?Sized + TreeStorage<Type>,
 		Compare: FnMut(&Type::Key) -> std::cmp::Ordering,
 	{
-		node::AA::find(storage.nodes(), self.root, |key| compare(key).reverse()).0
+		// Sound, since the links of the tree point to its nodes in the storage
+		let nodes = unsafe {node::Nodes::new(storage.nodes())};
+		node::AA::find(nodes, self.root, |key| compare(key).reverse()).0
 	}
 	
 	pub fn get<'t, Type, Storage, Compare>(&self, storage: &'t Storage, compare: Compare) -> Option<&'t Type>
@@ -240,7 +242,8 @@ impl TreeBase
 		{
 			std::cmp::Ordering::Greater => (node::Link::NIL, self.last, 1),
 			std::cmp::Ordering::Equal => (self.last, node::Link::NIL, 0),
-			std::cmp::Ordering::Less => node::AA::find(storage.nodes(), self.root, |key| compare(value.key(), key)),
+			// Sound, since the links of the tree point to its nodes in the storage
+			std::cmp::Ordering::Less => node::AA::find(unsafe {node::Nodes::new(storage.nodes())}, self.root, |key| compare(value.key(), key)),
 		};
 		
 		if position != node::Link::NIL
@@ -262,7 +265,8 @@ impl TreeBase
 			self.last = position;
 		}
 		
-		let nodes = storage.nodes_mut();
+		// Sound, since the links of the tree point to its nodes in the storage, which now include the new one
+		let nodes = unsafe {node::Nodes::new_mut(storage.nodes_mut())};
 		
 		if node::AA::insert_rebalance(nodes, parent, parent_index, position)
 		{
@@ -284,7 +288,8 @@ impl TreeBase
 		}
 		
 		let position = node::Link::new(position);
-		let nodes = storage.nodes_mut();
+		// Sound, since `position` is a node in the storage and the links of the tree point to its nodes
+		let nodes = unsafe {node::Nodes::new_mut(storage.nodes_mut())};
 		let parent = nodes[position].parent;
 		let rdes = nodes[position].descendants[1];
 		
@@ -331,7 +336,9 @@ impl TreeBase
 		if moved != usize::MAX
 		{
 			let moved = node::Link::new(moved);
-			node::AA::relocate(storage.nodes_mut(), moved, position);
+			// Sound, since the moved node is at `position` now and the links of the tree point to its other nodes,
+			// whose indices did not change, the removed node is unlinked
+			node::AA::relocate(unsafe {node::Nodes::new_mut(storage.nodes_mut())}, moved, position);
 			
 			for index in [&mut self.root, &mut self.first, &mut self.last]
 			{
