@@ -447,7 +447,8 @@ pub(super) trait AA<Type>: std::ops::Index<Link, Output = Node<Type>>
 		return if parent == Link::NIL {index} else {Link::NIL};
 	}
 	
-	fn find_successor(&mut self, mut index: Link) -> Link
+	/// Returns the in-order successor of a node at a level above 0, or `Link::NIL` for a node at level 0.
+	fn find_successor(&self, mut index: Link) -> Link
 	{
 		if self[index].level == 0
 		{
@@ -462,20 +463,6 @@ pub(super) trait AA<Type>: std::ops::Index<Link, Output = Node<Type>>
 		}
 		
 		return index;
-	}
-	
-	fn erase_rebalance(&mut self, index: Link) -> Link
-	where
-		Self: std::ops::IndexMut<Link, Output = Node<Type>>,
-	{
-		let successor = self.find_successor(index);
-		
-		if successor != Link::NIL
-		{
-			self.swap_nodes(index, successor);
-		}
-		
-		return self.erase_rebalance_leaf(index);
 	}
 	
 	/// Updates the links pointing to a node which was moved from `from` to `to`.

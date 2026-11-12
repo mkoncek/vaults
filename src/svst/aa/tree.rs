@@ -278,10 +278,16 @@ impl TreeBase
 		let parent = nodes[position].parent;
 		let rdes = nodes[position].descendants[1];
 		
-		// The node replacing the root if the root is removed
-		let root_successor = if position == self.root {node::AA::find_successor(nodes, position)} else {node::Link::NIL};
+		// A node above level 0 is first swapped with its successor, which is at level 0,
+		// the successor then also replaces it as the root if the rebalancing does not reach the root
+		let successor = node::AA::find_successor(nodes, position);
 		
-		let new_root = node::AA::erase_rebalance(nodes, position);
+		if successor != node::Link::NIL
+		{
+			node::AA::swap_nodes(nodes, position, successor);
+		}
+		
+		let new_root = node::AA::erase_rebalance_leaf(nodes, position);
 		
 		if new_root != node::Link::NIL
 		{
@@ -289,7 +295,7 @@ impl TreeBase
 		}
 		else if position == self.root
 		{
-			self.root = root_successor;
+			self.root = successor;
 		}
 		
 		if position == self.first
