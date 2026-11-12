@@ -370,31 +370,38 @@ where Type: Clone
 		return result;
 	}
 	
+	/// The values keep their indices.
 	fn clone_from(&mut self, source: &Self)
 	{
 		self.clear();
 		
-		if self.capacity() < source.capacity()
+		// The capacity has to exceed the highest occupied index
+		let header = source.index_header_leaf();
+		let end = match header.iter().rposition(|&word| word != 0)
 		{
-			let mut capacity = 0;
-			let header = source.index_header_leaf();
-			
-			for i in (0 .. header.len()).rev()
-			{
-				if header[i] != 0
-				{
-					capacity = bit_indexing::IndexType::BITS as usize * i;
-					break;
-				}
-			}
-			
-			if self.capacity() < capacity
-			{
-				*self = Self::with_capacity(capacity);
-			}
+			Some(i) => (i + 1) * bit_indexing::IndexType::BITS as usize - header[i].leading_zeros() as usize,
+			None => 0,
+		};
+		
+		if self.capacity() < end
+		{
+			// There are no values to keep, so a new allocation avoids copying the old one
+			*self = Self::new();
+			self.reserve_exact(end);
 		}
 		
-		todo!()
+		let capacity = self.capacity();
+		let array_offset = Self::array_offset(self.index_length);
+		
+		for index in source.index_iter()
+		{
+			let value = unsafe {source.get_unchecked(index)}.clone();
+			
+			// Each value is marked right after it is written, so that it is dropped if a later clone panics
+			unsafe {self.storage.data.as_ptr().add(array_offset).cast::<Type>().add(index).write(value)};
+			bit_indexing::insert(self.index_header_mut(), index, capacity);
+			self.len += 1;
+		}
 	}
 }
 
@@ -728,6 +735,91 @@ fn test_capacity_overflow_additional()
 	let mut r = Repository::new();
 	r.insert(0);
 	r.reserve(usize::MAX);
+}
+
+#[test]
+fn test_clone()
+{
+	use std::rc::Rc;
+	
+	// Vacant slots throughout, the highest index is the last one of a word
+	let mut source = Repository::new();
+	
+	for i in 0 .. 300
+	{
+		source.insert(Rc::new(i));
+	}
+	
+	for i in (0 .. 300).filter(|&i| i % 3 == 0 && i != 255 || i > 255)
+	{
+		source.remove(i);
+	}
+	
+	let check = |clone: &Repository<Rc<i32>>|
+	{
+		assert_eq!(source.len(), clone.len());
+		assert!(source.index_iter().eq(clone.index_iter()));
+		assert!(source.index_iter().all(|i| Rc::ptr_eq(&source[i], &clone[i])));
+	};
+	
+	let clone = source.clone();
+	check(&clone);
+	assert_eq!(256, clone.capacity());
+	
+	// Into repositories holding values, with more and less capacity than needed
+	let mut larger = Repository::with_capacity(1000);
+	let mut smaller = Repository::new();
+	
+	for _ in 0 .. 500
+	{
+		larger.insert(Rc::new(-1));
+	}
+	
+	smaller.insert(Rc::new(-1));
+	larger.clone_from(&source);
+	smaller.clone_from(&source);
+	check(&larger);
+	check(&smaller);
+	assert!(larger.capacity() >= 1000);
+	
+	// Insertion continues at the lowest vacant index
+	let mut clone = clone;
+	assert_eq!(0, clone.insert(Rc::new(0)));
+	
+	drop((clone, larger, smaller));
+	assert!(source.iter().all(|value| Rc::strong_count(value) == 1));
+	assert_eq!(0, Repository::<i32>::new().clone().len());
+}
+
+#[test]
+fn test_clone_panic()
+{
+	// A panicking clone leaves the values cloned before it, which are dropped later
+	struct Bomb(std::rc::Rc<()>, bool);
+	
+	impl Clone for Bomb
+	{
+		fn clone(&self) -> Self
+		{
+			assert!(! self.1, "bomb");
+			Bomb(self.0.clone(), false)
+		}
+	}
+	
+	let counter = std::rc::Rc::new(());
+	let mut source = Repository::new();
+	
+	for i in 0 .. 10
+	{
+		source.insert(Bomb(counter.clone(), i == 6));
+	}
+	
+	let mut target = Repository::new();
+	assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| target.clone_from(&source))).is_err());
+	assert_eq!(6, target.len());
+	assert_eq!(1 + 10 + 6, std::rc::Rc::strong_count(&counter));
+	drop(target);
+	assert_eq!(1 + 10, std::rc::Rc::strong_count(&counter));
 }
 
 #[test]

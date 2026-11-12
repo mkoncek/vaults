@@ -476,6 +476,73 @@ fn test_push_front()
 	}
 }
 
+/// Marks `position`, which must not be present and must be lower than `size`.
+#[inline]
+pub fn insert(index_span: &mut [IndexType], mut position: usize, size: usize)
+{
+	// The offset of the current level, starting at the level of the values
+	let mut offset = index_span.len() - level_length_at(size, 0);
+	let modulus = position % IndexType::BITS as usize;
+	position /= IndexType::BITS as usize;
+	index_span[offset + position] |= 1 << modulus;
+	
+	// Mark the full words in the levels above
+	for level in 0 .. depth(size)
+	{
+		if ! index_span[offset + position] != 0
+		{
+			break;
+		}
+		
+		let modulus = position % IndexType::BITS as usize;
+		position /= IndexType::BITS as usize;
+		offset -= level_length_at(size, level + 1);
+		index_span[offset + position] |= 1 << modulus;
+	}
+}
+
+#[test]
+fn test_insert()
+{
+	// Three levels with partial last words
+	let capacity = 128 * 128 + 5;
+	let length = index_length(capacity);
+	
+	{
+		let mut arr = vec![0; length];
+		insert(&mut arr, 2, capacity);
+		insert(&mut arr, 3, capacity);
+		assert_eq!([0, 1, 4, 5], [0; 4].map(|_| push_front(&mut arr, capacity)));
+	}
+	
+	{
+		// Marking all positions in any order gives the same index as pushing them in order
+		let mut pushed = vec![0; length];
+		let mut inserted = vec![0; length];
+		
+		for i in 0 .. capacity
+		{
+			push_front(&mut pushed, capacity);
+			// A permutation, since 7919 is a prime not dividing the capacity
+			insert(&mut inserted, i * 7919 % capacity, capacity);
+		}
+		
+		assert_eq!(pushed, inserted);
+	}
+	
+	{
+		// A full word marks its bit in the level above, so pushing skips it
+		let mut arr = vec![0; length];
+		
+		for i in (0 .. 2 * 128).rev()
+		{
+			insert(&mut arr, i, capacity);
+		}
+		
+		assert_eq!(2 * 128, push_front(&mut arr, capacity));
+	}
+}
+
 pub fn copy(source_span: &[IndexType], mut source_size: usize, target_span: &mut [IndexType], mut target_size: usize)
 {
 	assert!(source_span.len() <= target_span.len());
