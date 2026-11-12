@@ -48,13 +48,21 @@ impl<Type> Repository<Type>
 	pub fn capacity(&self) -> usize {self.storage.capacity}
 	
 	/// Reserves capacity for at least `additional` more values to be inserted in the repository.
+	#[inline]
 	pub fn reserve(&mut self, additional: usize)
 	{
 		if self.capacity() < self.len() + additional
 		{
-			let additional_exact = VectorStorage::default_capacity_for(self.capacity(), additional + self.capacity());
-			self.reserve_exact_unchecked(additional_exact);
+			self.grow(additional);
 		}
+	}
+	
+	#[cold]
+	#[inline(never)]
+	fn grow(&mut self, additional: usize)
+	{
+		let additional_exact = VectorStorage::default_capacity_for(self.capacity(), additional + self.capacity());
+		self.reserve_exact_unchecked(additional_exact);
 	}
 	
 	/// Reserves capacity for at least `additional` more values to be inserted in the repository without excessive over-allocation.

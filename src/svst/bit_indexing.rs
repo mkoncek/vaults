@@ -6,6 +6,7 @@
 
 pub type IndexType = u128;
 
+#[inline]
 pub(super) const fn indices(index: usize) -> (usize, IndexType)
 {
 	(
@@ -22,6 +23,7 @@ pub struct IndexIterator
 
 impl IndexIterator
 {
+	#[inline]
 	pub fn new(bitset: IndexType) -> Self
 	{
 		Self {bitset}
@@ -32,6 +34,7 @@ impl Iterator for IndexIterator
 {
 	type Item = usize;
 	
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item>
 	{
 		if self.bitset == 0
@@ -64,6 +67,7 @@ pub struct TransientIndexSliceIterator
 
 impl TransientIndexSliceIterator
 {
+	#[inline]
 	pub fn new(bitset: &[IndexType]) -> Self
 	{
 		Self
@@ -73,6 +77,7 @@ impl TransientIndexSliceIterator
 		}
 	}
 	
+	#[inline]
 	pub fn next(&mut self, bitset: &[IndexType]) -> Option<usize>
 	{
 		if self.pos == bitset.len()
@@ -120,6 +125,7 @@ pub struct IndexSliceIterator<'t>
 
 impl<'t> IndexSliceIterator<'t>
 {
+	#[inline]
 	pub fn new(bitset: &'t [IndexType]) -> Self
 	{
 		Self
@@ -134,6 +140,7 @@ impl<'t> Iterator for IndexSliceIterator<'t>
 {
 	type Item = usize;
 	
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item>
 	{
 		self.it.next(self.bitset)
@@ -162,6 +169,7 @@ fn test_index_slice_iterator()
 	assert_eq!(2, IndexSliceIterator::new(&[1, 1]).count());
 }
 
+#[inline]
 pub const fn level_length(mut size: usize) -> usize
 {
 	size += IndexType::BITS as usize - 1;
@@ -265,6 +273,7 @@ fn test_contains()
 	}
 }
 
+#[inline]
 pub fn erase(mut index_span: &mut [IndexType], mut position: usize, mut size: usize) -> bool
 {
 	let mut result = false;
@@ -338,6 +347,7 @@ fn test_erase()
 
 /// The number of words of the level `level` of the index, where level 0 holds the bits of the values,
 /// i.e. `level_length` applied `level + 1` times to `size`.
+#[inline]
 const fn level_length_at(size: usize, level: u32) -> usize
 {
 	let shift = IndexType::BITS.trailing_zeros() * (level + 1);
@@ -351,6 +361,7 @@ const fn level_length_at(size: usize, level: u32) -> usize
 }
 
 /// The number of levels of the index below its single top word.
+#[inline]
 const fn depth(size: usize) -> u32
 {
 	let bits = usize::BITS - size.saturating_sub(1).leading_zeros();
@@ -385,6 +396,7 @@ fn test_level_length_at()
 
 /// Marks the lowest index which is not present, returns that index.
 /// There must be such index lower than `size`.
+#[inline]
 pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
 {
 	let depth = depth(size);
