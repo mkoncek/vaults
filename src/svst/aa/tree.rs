@@ -239,22 +239,25 @@ impl TreeBase
 		}
 		
 		position = node::Link::new(storage.push(node::Node::new(value)));
+		
+		// The new node is the leftmost one exactly if it is attached to the left of the leftmost one,
+		// since any other place is reached by going right at least once, likewise for the rightmost one.
+		// Rebalancing does not change the order of the nodes.
+		if parent_index == 0 && parent == self.first
+		{
+			self.first = position;
+		}
+		else if parent_index == 1 && parent == self.last
+		{
+			self.last = position;
+		}
+		
 		let nodes = storage.nodes_mut();
 		
 		if node::AA::insert_rebalance(nodes, parent, parent_index, position)
 		{
 			self.root = node::AA::skew(nodes, self.root);
 			self.root = node::AA::split(nodes, self.root);
-		}
-		
-		if nodes[self.first].descendants[0] == position || nodes[position].descendants[1] == self.first
-		{
-			self.first = position;
-		}
-		
-		if nodes[position].parent == self.last
-		{
-			self.last = position;
 		}
 		
 		return consumer(None);
