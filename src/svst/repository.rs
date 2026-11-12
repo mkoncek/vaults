@@ -51,26 +51,27 @@ impl<Type> Repository<Type>
 	#[inline]
 	pub fn reserve(&mut self, additional: usize)
 	{
-		if self.capacity() < self.len() + additional
+		if additional > self.capacity() - self.len()
 		{
 			self.grow(additional);
 		}
 	}
 	
+	/// Grows the capacity by the default growth until there is room for `additional` more values.
 	#[cold]
 	#[inline(never)]
 	fn grow(&mut self, additional: usize)
 	{
-		let additional_exact = VectorStorage::default_capacity_for(self.capacity(), additional + self.capacity());
-		self.reserve_exact_unchecked(additional_exact);
+		let required = self.len().checked_add(additional).expect("capacity overflow");
+		self.reallocate(VectorStorage::default_capacity_for(self.capacity(), required));
 	}
 	
 	/// Reserves capacity for at least `additional` more values to be inserted in the repository without excessive over-allocation.
 	pub fn reserve_exact(&mut self, additional: usize)
 	{
-		if self.capacity() < self.len() + additional
+		if additional > self.capacity() - self.len()
 		{
-			self.reserve_exact_unchecked(additional);
+			self.reallocate(self.len().checked_add(additional).expect("capacity overflow"));
 		}
 	}
 	
@@ -287,9 +288,9 @@ impl<Type> Repository<Type>
 		&self.index_header()[self.index_length - bit_indexing::level_length(self.capacity()) .. self.index_length]
 	}
 	
-	fn reserve_exact_unchecked(&mut self, additional: usize)
+	/// Moves the values to a new allocation for `capacity` values, which must be greater than the current capacity.
+	fn reallocate(&mut self, capacity: usize)
 	{
-		let capacity = self.len() + additional;
 		let (new_layout, index_length) = Self::layout_for(capacity);
 		let new_data = match std::ptr::NonNull::new(unsafe {std::alloc::alloc(new_layout)})
 		{
@@ -653,6 +654,49 @@ fn test_remove()
 		len -= 1;
 		assert_eq!(len, r.len());
 	}
+}
+
+#[test]
+fn test_growth()
+{
+	// Insertions grow the capacity by the default growth
+	let mut r = Repository::new();
+	let mut capacities = Vec::new();
+	
+	for i in 0 .. 1000
+	{
+		r.insert(i);
+		
+		if capacities.last() != Some(&r.capacity())
+		{
+			capacities.push(r.capacity());
+		}
+	}
+	
+	let mut expected = vec![VectorStorage::default_capacity_growth(0)];
+	
+	while *expected.last().unwrap() < 1000
+	{
+		expected.push(VectorStorage::default_capacity_growth(*expected.last().unwrap()));
+	}
+	
+	assert_eq!(expected, capacities);
+	
+	// Reservation counts the vacant slots, values stay at their indices
+	for i in 0 .. 990
+	{
+		r.remove(i);
+	}
+	
+	let capacity = r.capacity();
+	r.reserve(capacity - 10);
+	assert_eq!(capacity, r.capacity());
+	r.reserve(capacity - 9);
+	assert_eq!(VectorStorage::default_capacity_growth(capacity), r.capacity());
+	r.reserve_exact(r.capacity() - 5);
+	assert_eq!(VectorStorage::default_capacity_growth(capacity) + 5, r.capacity());
+	assert!((990 .. 1000).all(|i| r[i] == i));
+	assert_eq!(10, r.len());
 }
 
 #[test]
