@@ -231,7 +231,14 @@ impl TreeBase
 			return consumer(None);
 		}
 		
-		let (mut position, parent, parent_index) = node::AA::find(storage.nodes(), self.root, |key| compare(value.key(), key));
+		// A value after the last one, as in ascending insertion, is attached to it without a search,
+		// which is where the search would end with a consistent ordering
+		let (mut position, parent, parent_index) = match compare(value.key(), storage.nodes()[self.last].as_ref().key())
+		{
+			std::cmp::Ordering::Greater => (node::Link::NIL, self.last, 1),
+			std::cmp::Ordering::Equal => (self.last, node::Link::NIL, 0),
+			std::cmp::Ordering::Less => node::AA::find(storage.nodes(), self.root, |key| compare(value.key(), key)),
+		};
 		
 		if position != node::Link::NIL
 		{
