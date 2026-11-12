@@ -285,10 +285,7 @@ impl<Type> Repository<Type>
 			None => std::alloc::handle_alloc_error(new_layout),
 		};
 		
-		for i in 0 .. index_length
-		{
-			unsafe {(new_data.as_ptr().cast::<bit_indexing::IndexType>()).offset(i as isize).write(0)};
-		}
+		unsafe {new_data.as_ptr().cast::<bit_indexing::IndexType>().write_bytes(0, index_length)};
 		
 		if self.capacity() != 0
 		{
@@ -305,18 +302,15 @@ impl<Type> Repository<Type>
 			let array_offset = Self::array_offset(self.index_length);
 			let new_array_offset = Self::array_offset(index_length);
 			
-			for i in self.index_iter()
+			// The whole array is copied at once including the vacant slots,
+			// which is allowed since the copy is untyped and preserves uninitialized bytes
+			unsafe
 			{
-				unsafe
-				{
-					self.storage.data.as_ptr().offset(array_offset as isize).cast::<Type>()
-						.offset(i as isize).copy_to_nonoverlapping(new_data.as_ptr().offset(new_array_offset as isize)
-						.cast::<Type>().offset(i as isize), 1)
-					;
-				};
+				self.storage.data.as_ptr().add(array_offset).cast::<Type>().copy_to_nonoverlapping(
+					new_data.as_ptr().add(new_array_offset).cast::<Type>(), self.capacity()
+				);
+				std::alloc::dealloc(self.storage.data.as_ptr(), Self::layout_for(self.capacity()).0);
 			}
-			
-			unsafe {std::alloc::dealloc(self.storage.data.as_ptr(), Self::layout_for(self.capacity()).0)};
 		}
 		
 		self.storage.data = new_data;
