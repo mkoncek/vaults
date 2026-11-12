@@ -147,7 +147,11 @@ impl<Type> Repository<Type>
 	{
 		if self.capacity() != 0
 		{
-			self.simple_clear();
+			if std::mem::needs_drop::<Type>()
+			{
+				self.simple_clear();
+			}
+			
 			self.len = 0;
 			self.index_header_mut().fill(0);
 		}
@@ -325,14 +329,11 @@ impl<Type> Drop for Repository<Type>
 	{
 		if self.capacity() != 0
 		{
-			self.simple_clear();
-			for i in 0 .. self.index_length
+			if std::mem::needs_drop::<Type>()
 			{
-				unsafe
-				{
-					self.storage.data.as_ptr().cast::<bit_indexing::IndexType>().offset(i as isize).drop_in_place();
-				}
+				self.simple_clear();
 			}
+			
 			unsafe {std::alloc::dealloc(self.storage.data.as_ptr(), Self::layout_for(self.capacity()).0)};
 		}
 	}
