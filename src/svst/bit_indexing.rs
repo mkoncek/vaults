@@ -43,7 +43,8 @@ impl Iterator for IndexIterator
 		}
 		
 		let result: Self::Item = self.bitset.trailing_zeros() as usize;
-		self.bitset &= ! (1 << result);
+		// Clears the lowest set bit, which is cheaper than shifting a 128 bit mask
+		self.bitset &= self.bitset - 1;
 		
 		return Some(result);
 	}
