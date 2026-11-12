@@ -148,24 +148,18 @@ pub(super) trait AA<Type>: std::ops::Index<Link, Output = Node<Type>>
 		while desc != Link::NIL
 		{
 			parent = desc;
+			let node = &self[desc];
+			let ordering = compare(node.value.key());
 			
-			match compare(self[desc].value.key())
+			if ordering == std::cmp::Ordering::Equal
 			{
-				std::cmp::Ordering::Less =>
-				{
-					parent_index = 0;
-					desc = self[desc].descendants[parent_index as usize];
-				},
-				std::cmp::Ordering::Greater =>
-				{
-					parent_index = 1;
-					desc = self[desc].descendants[parent_index as usize];
-				},
-				std::cmp::Ordering::Equal =>
-				{
-					break;
-				}
+				break;
 			}
+			
+			// The direction is selected by indexing rather than branching on it,
+			// it is unpredictable and a misprediction costs more than waiting for the comparison
+			parent_index = (ordering == std::cmp::Ordering::Greater) as u8;
+			desc = node.descendants[parent_index as usize];
 		}
 		
 		return (desc, parent, parent_index);
