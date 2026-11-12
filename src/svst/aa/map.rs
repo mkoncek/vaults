@@ -2,7 +2,7 @@ use crate::svst::aa;
 use crate::svst::aa::node;
 use crate::svst::aa::tree::{TreeStorage, RemovableTreeStorage};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MapEntry<KeyType, MappedType>(KeyType, MappedType);
 
 impl<KeyType, MappedType> node::Entry for MapEntry<KeyType, MappedType>
@@ -222,6 +222,59 @@ fn test_aa_vec_map()
 	assert_eq!(None, map.remove("c"));
 	assert_eq!(Some((&"b".to_owned(), &20)), map.first_key_value());
 	assert_eq!(1, map.len());
+}
+
+#[test]
+fn test_aa_map_clone()
+{
+	use std::rc::Rc;
+	
+	let mut map = Map::<u32, Rc<u32>>::new();
+	
+	for i in 0 .. 100
+	{
+		map.insert(i, Rc::new(i));
+	}
+	
+	let mut clone = map.clone();
+	*clone.get_mut(&5).unwrap() = Rc::new(500);
+	assert_eq!(5, *map[&5]);
+	assert_eq!(500, *clone[&5]);
+	assert!((0 .. 100).filter(|&i| i != 5).all(|i| Rc::ptr_eq(&map[&i], &clone[&i])));
+	
+	// A panicking clone of a value leaves the source intact and leaks nothing
+	struct Bomb(Rc<()>, bool);
+	
+	impl Clone for Bomb
+	{
+		fn clone(&self) -> Self
+		{
+			assert!(! self.1, "bomb");
+			Bomb(self.0.clone(), false)
+		}
+	}
+	
+	fn check<Storage>(mut map: aa::tree::Tree<MapEntry<u32, Bomb>, Storage>)
+	where
+		Storage: RemovableTreeStorage<MapEntry<u32, Bomb>> + Clone,
+	{
+		let counter = Rc::new(());
+		
+		for i in 0 .. 10
+		{
+			map.insert(i, Bomb(counter.clone(), i == 6));
+		}
+		
+		assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| map.clone())).is_err());
+		assert_eq!(1 + 10, Rc::strong_count(&counter));
+		assert_eq!(10, map.len());
+		assert!((0 .. 10).all(|i| map.contains_key(&i)));
+		drop(map);
+		assert_eq!(1, Rc::strong_count(&counter));
+	}
+	
+	check(Map::new());
+	check(VecMap::new());
 }
 
 #[test]

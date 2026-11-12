@@ -125,7 +125,7 @@ impl<Type> RemovableTreeStorage<Type> for Vec<node::Node<Type>>
 ///
 /// It is private, since its links are only meaningful for the storage of the tree.
 /// Storage cannot be implemented outside of the crate anyway, since the nodes are private.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct TreeBase
 {
 	pub root: node::Link,
@@ -585,6 +585,25 @@ where
 		Type: node::Entry,
 	{
 		self.base.pop_last(&mut self.storage)
+	}
+}
+
+/// Both storages keep the indices of the nodes in their clones, so the links stay valid.
+/// 
+/// `clone_from` is not specialized to reuse the storage, since a panicking clone of a value
+/// would leave a storage with fewer nodes than the tree has.
+impl<Type, Storage> Clone for Tree<Type, Storage>
+where
+	Storage: TreeStorage<Type> + Clone,
+{
+	fn clone(&self) -> Self
+	{
+		Self
+		{
+			base: self.base.clone(),
+			storage: self.storage.clone(),
+			_data: std::marker::PhantomData,
+		}
 	}
 }
 

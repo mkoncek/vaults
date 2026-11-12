@@ -2,7 +2,7 @@ use crate::svst::aa;
 use crate::svst::aa::node;
 use crate::svst::aa::tree::{TreeStorage, RemovableTreeStorage};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SetEntry<KeyType>(KeyType);
 
 impl<KeyType> node::Entry for SetEntry<KeyType>
@@ -309,6 +309,41 @@ fn test_aa_set_double_ended()
 		
 		assert_eq!((0 .. size).collect::<Vec<_>>(), result);
 	}
+}
+
+#[test]
+fn test_aa_set_clone()
+{
+	fn check<Storage>(mut set: aa::tree::Tree<SetEntry<u32>, Storage>)
+	where
+		Storage: RemovableTreeStorage<SetEntry<u32>> + Clone,
+	{
+		// With vacant slots in the storage, if it keeps them
+		for i in 0 .. 1000
+		{
+			set.insert(i * 7 % 1000);
+		}
+		
+		set.retain(|i| i % 3 != 0);
+		let mut clone = set.clone();
+		assert_eq!(set.len(), node::check_invariants(clone.storage.nodes(), clone.base.root));
+		assert!(set.iter().eq(clone.iter()));
+		assert!(set.iter().rev().eq(clone.iter().rev()));
+		assert!((0 .. set.capacity()).all(|i| set.impl_get_at(i).map(|v| v.0) == clone.impl_get_at(i).map(|v| v.0)));
+		
+		// The clone is independent
+		assert!(clone.insert(3));
+		assert!(clone.remove(&1));
+		assert!(set.contains(&1) && ! set.contains(&3));
+		assert_eq!(set.len(), node::check_invariants(set.storage.nodes(), set.base.root));
+		assert_eq!(clone.len(), node::check_invariants(clone.storage.nodes(), clone.base.root));
+		
+		clone.clone_from(&set);
+		assert!(set.iter().eq(clone.iter()));
+	}
+	
+	check(Set::<u32>::new());
+	check(VecSet::<u32>::new());
 }
 
 #[test]

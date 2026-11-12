@@ -19,7 +19,7 @@ impl Link
 	pub fn index(self) -> usize {self.0}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node<Type>
 {
 	pub(super) parent: Link,
