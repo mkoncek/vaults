@@ -80,9 +80,7 @@ impl<Type> Repository<Type>
 	#[inline]
 	pub unsafe fn as_slice(&self) -> &[Type]
 	{
-		std::slice::from_raw_parts(self.storage.data.as_ptr()
-			.offset(Self::array_offset(self.index_length) as isize).cast::<Type>(), self.capacity()
-		)
+		std::slice::from_raw_parts(self.values(), self.capacity())
 	}
 	
 	/// Returns a mutable slice containing the values of the repository.
@@ -90,9 +88,7 @@ impl<Type> Repository<Type>
 	#[inline]
 	pub unsafe fn as_mut_slice(&mut self) -> &mut [Type]
 	{
-		std::slice::from_raw_parts_mut(self.storage.data.as_ptr()
-			.offset(Self::array_offset(self.index_length) as isize).cast::<Type>(), self.capacity()
-		)
+		std::slice::from_raw_parts_mut(self.values(), self.capacity())
 	}
 	
 	/// Inserts a value in the repository returning its index within the repository.
@@ -106,12 +102,7 @@ impl<Type> Repository<Type>
 		let capacity = self.capacity();
 		let index = bit_indexing::push_front(self.index_header_mut(), capacity);
 		
-		unsafe
-		{
-			self.storage.data.as_ptr().offset(Self::array_offset(self.index_length) as isize)
-				.cast::<Type>().offset(index as isize).write(value)
-			;
-		}
+		unsafe {self.values().add(index).write(value)};
 		
 		self.len += 1;
 		
@@ -129,12 +120,7 @@ impl<Type> Repository<Type>
 		
 		if index < capacity && bit_indexing::erase(self.index_header_mut(), index, capacity)
 		{
-			unsafe
-			{
-				result = Some(self.storage.data.as_ptr().offset(Self::array_offset(self.index_length) as isize)
-					.cast::<Type>().offset(index as isize).read()
-				);
-			}
+			unsafe {result = Some(self.values().add(index).read())};
 			
 			self.len -= 1;
 		}
@@ -151,9 +137,7 @@ impl<Type> Repository<Type>
 		let capacity = self.capacity();
 		bit_indexing::erase(self.index_header_mut(), index, capacity);
 		self.len -= 1;
-		return self.storage.data.as_ptr().offset(Self::array_offset(self.index_length) as isize)
-			.cast::<Type>().offset(index as isize).read()
-		;
+		return self.values().add(index).read();
 	}
 	
 	/// Clears the repository, removing all values.
@@ -243,28 +227,28 @@ impl<Type> Repository<Type>
 	
 	fn simple_clear(&mut self)
 	{
-		let array_offset = Self::array_offset(self.index_length);
-		
 		for i in self.index_iter()
 		{
-			unsafe
-			{
-				self.storage.data.as_ptr().offset(array_offset as isize)
-					.cast::<Type>().offset(i as isize).drop_in_place()
-				;
-			};
+			unsafe {self.values().add(i).drop_in_place()};
 		}
 	}
 	
-	fn array_offset(index_length: usize) -> usize
+	/// Returns the array of the values, which starts the allocation.
+	#[inline]
+	fn values(&self) -> *mut Type
 	{
-		let type_alignment = std::mem::align_of::<Type>();
-		return (index_length * std::mem::size_of::<bit_indexing::IndexType>() as usize
-			+ type_alignment - 1) / type_alignment * type_alignment
-		;
+		self.storage.data.as_ptr().cast::<Type>()
 	}
 	
-	/// Returns the layout of the allocation for `capacity` values and the length of its index.
+	/// Returns the offset of the index in the allocation for `capacity` values, it follows them.
+	/// The size of the allocation must not overflow.
+	#[inline]
+	fn index_offset(capacity: usize) -> usize
+	{
+		(std::mem::size_of::<Type>() * capacity).next_multiple_of(std::mem::align_of::<bit_indexing::IndexType>())
+	}
+	
+	/// Returns the layout of the allocation for `capacity` values followed by the index and the length of the index.
 	/// Panics if the size overflows.
 	fn layout_for(capacity: usize) -> (std::alloc::Layout, usize)
 	{
@@ -273,9 +257,10 @@ impl<Type> Repository<Type>
 			std::mem::align_of::<bit_indexing::IndexType>(),
 		);
 		let index_length = crate::svst::bit_indexing::index_length(capacity);
-		// The index has at most `capacity / 127 + 10` words, so its size and the offset of the values do not overflow
+		// The index has at most `capacity / 127 + 10` words, so its size does not overflow
 		let byte_size = std::mem::size_of::<Type>().checked_mul(capacity)
-			.and_then(|size| size.checked_add(Self::array_offset(index_length)))
+			.and_then(|size| size.checked_next_multiple_of(std::mem::align_of::<bit_indexing::IndexType>()))
+			.and_then(|offset| offset.checked_add(index_length * std::mem::size_of::<bit_indexing::IndexType>()))
 			.expect("capacity overflow")
 		;
 		let layout = std::alloc::Layout::from_size_align(byte_size, alignment).expect("capacity overflow");
@@ -287,7 +272,7 @@ impl<Type> Repository<Type>
 	fn index_header(&self) -> &[bit_indexing::IndexType]
 	{
 		unsafe {std::slice::from_raw_parts(
-			self.storage.data.as_ptr().cast::<bit_indexing::IndexType>(), self.index_length
+			self.storage.data.as_ptr().add(Self::index_offset(self.capacity())).cast::<bit_indexing::IndexType>(), self.index_length
 		)}
 	}
 	
@@ -295,7 +280,7 @@ impl<Type> Repository<Type>
 	fn index_header_mut(&mut self) -> &mut [bit_indexing::IndexType]
 	{
 		unsafe {std::slice::from_raw_parts_mut(
-			self.storage.data.as_ptr().cast::<bit_indexing::IndexType>(), self.index_length
+			self.storage.data.as_ptr().add(Self::index_offset(self.capacity())).cast::<bit_indexing::IndexType>(), self.index_length
 		)}
 	}
 	
@@ -305,41 +290,55 @@ impl<Type> Repository<Type>
 		&self.index_header()[self.index_length - bit_indexing::level_length(self.capacity()) .. self.index_length]
 	}
 	
-	/// Moves the values to a new allocation for `capacity` values, which must be greater than the current capacity.
+	/// Moves the values to an allocation for `capacity` values, which must be greater than the current capacity.
+	///
+	/// The allocation is resized, which the allocator can do without copying, so the index follows the values.
 	fn reallocate(&mut self, capacity: usize)
 	{
 		let (new_layout, index_length) = Self::layout_for(capacity);
-		let new_data = match std::ptr::NonNull::new(unsafe {std::alloc::alloc(new_layout)})
+		let old_capacity = self.capacity();
+		let old_offset = Self::index_offset(old_capacity);
+		let new_offset = Self::index_offset(capacity);
+		let word_size = std::mem::size_of::<bit_indexing::IndexType>();
+		
+		// The index moves further, but its new place overlaps the old one if it moves less than its length,
+		// which happens only for very small values or a very small growth, the old index is kept aside then
+		let saved = if old_capacity != 0 && new_offset < old_offset + self.index_length * word_size
 		{
-			Some(p) => p,
-			None => std::alloc::handle_alloc_error(new_layout),
+			Some(self.index_header().to_vec())
+		}
+		else
+		{
+			None
 		};
 		
-		unsafe {new_data.as_ptr().cast::<bit_indexing::IndexType>().write_bytes(0, index_length)};
-		
-		if self.capacity() != 0
+		let new_data = unsafe
 		{
-			unsafe
+			if old_capacity == 0
 			{
-				bit_indexing::copy(
-					std::slice::from_raw_parts(self.storage.data.as_ptr().cast::<bit_indexing::IndexType>(), self.index_length),
-					self.capacity(),
-					std::slice::from_raw_parts_mut(new_data.as_ptr().cast::<bit_indexing::IndexType>(), index_length),
-					capacity,
-				)
-			};
-			
-			let array_offset = Self::array_offset(self.index_length);
-			let new_array_offset = Self::array_offset(index_length);
-			
-			// The whole array is copied at once including the vacant slots,
-			// which is allowed since the copy is untyped and preserves uninitialized bytes
-			unsafe
+				std::alloc::alloc(new_layout)
+			}
+			else
 			{
-				self.storage.data.as_ptr().add(array_offset).cast::<Type>().copy_to_nonoverlapping(
-					new_data.as_ptr().add(new_array_offset).cast::<Type>(), self.capacity()
-				);
-				std::alloc::dealloc(self.storage.data.as_ptr(), Self::layout_for(self.capacity()).0);
+				std::alloc::realloc(self.storage.data.as_ptr(), Self::layout_for(old_capacity).0, new_layout.size())
+			}
+		};
+		let new_data = std::ptr::NonNull::new(new_data).unwrap_or_else(|| std::alloc::handle_alloc_error(new_layout));
+		
+		unsafe
+		{
+			let new_index = new_data.as_ptr().add(new_offset).cast::<bit_indexing::IndexType>();
+			new_index.write_bytes(0, index_length);
+			
+			if old_capacity != 0
+			{
+				let old_index = match &saved
+				{
+					Some(saved) => saved.as_slice(),
+					None => std::slice::from_raw_parts(new_data.as_ptr().add(old_offset).cast::<bit_indexing::IndexType>(), self.index_length),
+				};
+				
+				bit_indexing::copy(old_index, old_capacity, std::slice::from_raw_parts_mut(new_index, index_length), capacity);
 			}
 		}
 		
@@ -401,14 +400,13 @@ where Type: Clone
 		}
 		
 		let capacity = self.capacity();
-		let array_offset = Self::array_offset(self.index_length);
 		
 		for index in source.index_iter()
 		{
 			let value = unsafe {source.get_unchecked(index)}.clone();
 			
 			// Each value is marked right after it is written, so that it is dropped if a later clone panics
-			unsafe {self.storage.data.as_ptr().add(array_offset).cast::<Type>().add(index).write(value)};
+			unsafe {self.values().add(index).write(value)};
 			bit_indexing::insert(self.index_header_mut(), index, capacity);
 			self.len += 1;
 		}
@@ -830,6 +828,38 @@ fn test_clone_panic()
 	assert_eq!(1 + 10 + 6, std::rc::Rc::strong_count(&counter));
 	drop(target);
 	assert_eq!(1 + 10, std::rc::Rc::strong_count(&counter));
+}
+
+#[test]
+fn test_reallocation_overlapping_index()
+{
+	// The new place of the index overlaps the old one for zero-sized values
+	let mut zero_sized = Repository::new();
+	
+	for _ in 0 .. 1000
+	{
+		zero_sized.insert(());
+	}
+	
+	for i in (0 .. 1000).step_by(3)
+	{
+		zero_sized.remove(i);
+	}
+	
+	zero_sized.reserve_exact(zero_sized.capacity() - zero_sized.len() + 1);
+	assert!(zero_sized.index_iter().eq((0 .. 1000).filter(|i| i % 3 != 0)));
+	
+	// And for growth by one, across the addition of an index level
+	let mut bytes = Repository::new();
+	
+	for i in 0 .. 300
+	{
+		bytes.reserve_exact(bytes.capacity() - bytes.len() + 1);
+		assert_eq!(i, bytes.insert(i as u8));
+	}
+	
+	assert_eq!(300, bytes.capacity());
+	assert!((0 .. 300).all(|i| bytes[i] == i as u8));
 }
 
 #[test]
