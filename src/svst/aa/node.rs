@@ -255,7 +255,7 @@ pub(super) trait AA<Type>: std::ops::Index<Link, Output = Node<Type>>
 	const ERASE_PROPAGATION_DISTANCE: i32 = 1;
 	
 	fn insert_rebalance(&mut self, mut parent: Link,
-		mut parent_index: u8, mut index: Link) -> bool
+		parent_index: u8, mut index: Link) -> bool
 	where
 		Self: std::ops::IndexMut<Link, Output = Node<Type>>,
 	{
@@ -268,8 +268,6 @@ pub(super) trait AA<Type>: std::ops::Index<Link, Output = Node<Type>>
 			parent != Link::NIL && changes > 0
 		}
 		{
-			parent_index = self.get_parent_index(index, parent);
-			
 			changes -= 1;
 			
 			let original = index;
@@ -292,6 +290,8 @@ pub(super) trait AA<Type>: std::ops::Index<Link, Output = Node<Type>>
 			
 			if index != original
 			{
+				// The rotations do not modify `parent`, so it still links to `original`
+				let parent_index = self.get_parent_index(original, parent);
 				self[parent].descendants[parent_index as usize] = index;
 			}
 		}
