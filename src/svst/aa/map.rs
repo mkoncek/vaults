@@ -23,6 +23,12 @@ where
 	pub fn first_key_value(&self) -> Option<(&KeyType, &MappedType)> {self.impl_first().map(|v| (&v.0, &v.1))}
 	pub fn last_key_value(&self) -> Option<(&KeyType, &MappedType)> {self.impl_last().map(|v| (&v.0, &v.1))}
 	
+	/// Returns an iterator over the entries in the order of their keys.
+	pub fn iter<'t>(&'t self) -> node::Iterator<&'t [node::Node<MapEntry<KeyType, MappedType>>]>
+	{
+		self.impl_iter()
+	}
+	
 	/// Like [`contains_key`](Self::contains_key), but searches using `compare`,
 	/// which returns the ordering of a key in the map relative to the searched one.
 	/// 
@@ -183,6 +189,55 @@ where
 	}
 }
 
+impl<'t, KeyType, MappedType> std::iter::Iterator for node::Iterator<&'t [node::Node<MapEntry<KeyType, MappedType>>]>
+{
+	type Item = (&'t KeyType, &'t MappedType);
+	
+	#[inline]
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		let i = self.advance::<0>();
+		return if i != node::Link::NIL {let entry = self.nodes[i].as_ref(); Some((&entry.0, &entry.1))} else {None};
+	}
+	
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		(self.remaining, Some(self.remaining))
+	}
+	
+	fn last(mut self) -> Option<Self::Item>
+	{
+		self.next_back()
+	}
+}
+
+impl<'t, KeyType, MappedType> std::iter::DoubleEndedIterator for node::Iterator<&'t [node::Node<MapEntry<KeyType, MappedType>>]>
+{
+	#[inline]
+	fn next_back(&mut self) -> Option<Self::Item>
+	{
+		let i = self.advance::<1>();
+		return if i != node::Link::NIL {let entry = self.nodes[i].as_ref(); Some((&entry.0, &entry.1))} else {None};
+	}
+}
+
+impl<'t, KeyType, MappedType> std::iter::ExactSizeIterator for node::Iterator<&'t [node::Node<MapEntry<KeyType, MappedType>>]> {}
+impl<'t, KeyType, MappedType> std::iter::FusedIterator for node::Iterator<&'t [node::Node<MapEntry<KeyType, MappedType>>]> {}
+
+impl<'t, KeyType, MappedType, Storage> std::iter::IntoIterator for &'t aa::tree::Tree<MapEntry<KeyType, MappedType>, Storage>
+where
+	Storage: TreeStorage<MapEntry<KeyType, MappedType>>,
+{
+	type Item = (&'t KeyType, &'t MappedType);
+	type IntoIter = node::Iterator<&'t [node::Node<MapEntry<KeyType, MappedType>>]>;
+	
+	fn into_iter(self) -> Self::IntoIter
+	{
+		self.iter()
+	}
+}
+
 impl<Key, KeyType, MappedType, Storage> std::ops::Index<&Key> for aa::tree::Tree<MapEntry<KeyType, MappedType>, Storage>
 where
 	KeyType: std::borrow::Borrow<Key> + std::cmp::Ord,
@@ -222,6 +277,37 @@ fn test_aa_vec_map()
 	assert_eq!(None, map.remove("c"));
 	assert_eq!(Some((&"b".to_owned(), &20)), map.first_key_value());
 	assert_eq!(1, map.len());
+}
+
+#[test]
+fn test_aa_map_iter()
+{
+	fn check<Storage>(mut map: aa::tree::Tree<MapEntry<u32, String>, Storage>)
+	where
+		Storage: RemovableTreeStorage<MapEntry<u32, String>>,
+	{
+		let mut reference = std::collections::BTreeMap::new();
+		assert_eq!(None, map.iter().next());
+		
+		for i in 0 .. 500
+		{
+			let key = i * 7 % 500;
+			map.insert(key, key.to_string());
+			reference.insert(key, key.to_string());
+		}
+		
+		map.retain(|key, _| key % 3 != 0);
+		reference.retain(|key, _| key % 3 != 0);
+		
+		assert!(reference.iter().eq(map.iter()));
+		assert!(reference.iter().rev().eq(map.iter().rev()));
+		assert!(reference.iter().eq(&map));
+		assert_eq!(reference.len(), map.iter().len());
+		assert_eq!(reference.last_key_value(), map.iter().last());
+	}
+	
+	check(Map::new());
+	check(VecMap::new());
 }
 
 #[test]
