@@ -553,66 +553,71 @@ fn check_subtree<Type>(nodes: &[Node<Type>], index: Link) -> usize
 	return 1 + check_subtree(nodes, ldes) + check_subtree(nodes, rdes);
 }
 
-pub struct Iterator<Nodes: ?Sized>
+pub struct Iterator<Slice: ?Sized>
 {
-	#[allow(dead_code)] // Actually used by implementors
-	pub(super) first: Link,
-	#[allow(dead_code)] // Actually used by implementors
-	pub(super) last: Link,
+	/// The number of nodes not yet returned from either end.
+	pub(super) remaining: usize,
+	/// The next node to be returned from the front and from the back.
 	pub(super) bounds: [Link; 2],
-	pub(super) nodes: Nodes,
+	pub(super) nodes: Slice,
 }
 
-macro_rules! iter_impl
+impl<'t, Type> Iterator<&'t [Node<Type>]>
 {
-	($this: expr, $index: expr) =>
+	/// Returns the next node from the front if `SIDE` is 0 or from the back if it is 1, or `Link::NIL` if there are none left.
+	#[inline]
+	pub(super) fn advance<const SIDE: usize>(&mut self) -> Link
 	{
-		if $this.bounds[$index] == $crate::svst::aa::node::Link::NIL
+		if self.remaining == 0
 		{
-			$crate::svst::aa::node::Link::NIL
+			return Link::NIL;
 		}
-		else
+		
+		self.remaining -= 1;
+		let result = self.bounds[SIDE];
+		
+		// The neighbor in the direction of iteration is looked for only if some node is left,
+		// in which case it exists, so the climb below stops before passing the root
+		if self.remaining != 0
 		{
-			let result = $this.bounds[$index];
+			let nodes = self.nodes;
+			let mut index = result;
+			let desc = nodes[index].descendants[1 - SIDE];
 			
-			let desc = $this.nodes[$this.bounds[$index]].descendants[1 - $index];
-			
-			if desc != $crate::svst::aa::node::Link::NIL
+			if desc != Link::NIL
 			{
-				$this.bounds[$index] = desc;
+				index = desc;
 				
-				let mut descendant;
-				
-				while {descendant = $this.nodes[$this.bounds[$index]].descendants[$index]; descendant != $crate::svst::aa::node::Link::NIL}
+				loop
 				{
-					$this.bounds[$index] = descendant;
+					let desc = nodes[index].descendants[SIDE];
+					
+					if desc == Link::NIL
+					{
+						break;
+					}
+					
+					index = desc;
 				}
 			}
 			else
 			{
 				loop
 				{
-					let parent = $this.nodes[$this.bounds[$index]].parent;
+					let parent = nodes[index].parent;
+					let from_far_side = nodes[parent].descendants[1 - SIDE] == index;
+					index = parent;
 					
-					if parent == $crate::svst::aa::node::Link::NIL
+					if ! from_far_side
 					{
-						$this.bounds[1 - $index] = $crate::svst::aa::node::Link::NIL;
+						break;
 					}
-					else if $crate::svst::aa::node::AA::get_parent_index($this.nodes, $this.bounds[$index], parent) == 1 - $index
-					{
-						$this.bounds[$index] = parent;
-						continue;
-					}
-					
-					$this.bounds[$index] = parent;
-					
-					break;
 				}
 			}
 			
-			result
+			self.bounds[SIDE] = index;
 		}
+		
+		return result;
 	}
 }
-
-pub(super) use iter_impl;

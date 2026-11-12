@@ -144,21 +144,37 @@ impl<'t, Type> std::iter::Iterator for node::Iterator<&'t [node::Node<SetEntry<T
 {
 	type Item = &'t Type;
 	
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item>
 	{
-		let i = node::iter_impl!(self, 0);
+		let i = self.advance::<0>();
 		return if i != node::Link::NIL {Some(&self.nodes[i].as_ref().0)} else {None};
+	}
+	
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		(self.remaining, Some(self.remaining))
+	}
+	
+	fn last(mut self) -> Option<Self::Item>
+	{
+		self.next_back()
 	}
 }
 
 impl<'t, Type> std::iter::DoubleEndedIterator for node::Iterator<&'t [node::Node<SetEntry<Type>>]>
 {
+	#[inline]
 	fn next_back(&mut self) -> Option<Self::Item>
 	{
-		let i = node::iter_impl!(self, 1);
+		let i = self.advance::<1>();
 		return if i != node::Link::NIL {Some(&self.nodes[i].as_ref().0)} else {None};
 	}
 }
+
+impl<'t, Type> std::iter::ExactSizeIterator for node::Iterator<&'t [node::Node<SetEntry<Type>>]> {}
+impl<'t, Type> std::iter::FusedIterator for node::Iterator<&'t [node::Node<SetEntry<Type>>]> {}
 
 impl<'t, Type, Storage> std::iter::IntoIterator for &'t aa::tree::Tree<SetEntry<Type>, Storage>
 where
@@ -226,6 +242,8 @@ fn test_aa_set_1()
 	}
 	
 	assert_eq!(7, set.iter().rev().count());
+	assert_eq!(7, set.iter().len());
+	assert_eq!(Some(&14), set.iter().last());
 	
 	{
 		let mut rit = set.iter().rev();
@@ -237,6 +255,59 @@ fn test_aa_set_1()
 		assert_eq!(Some(8), rit.next().copied());
 		assert_eq!(Some(7), rit.next().copied());
 		assert_eq!(None, rit.next());
+	}
+}
+
+#[test]
+fn test_aa_set_double_ended()
+{
+	// Iteration from both ends stops where the ends meet, for every split point
+	for size in 0 .. 40
+	{
+		let mut set = Set::<i32>::new();
+		for i in 0 .. size
+		{
+			set.insert(i);
+		}
+		
+		for front in 0 ..= size
+		{
+			let mut it = set.iter();
+			let mut result = Vec::new();
+			
+			for _ in 0 .. front
+			{
+				result.push(*it.next().unwrap());
+				assert_eq!((size - result.len() as i32) as usize, it.len());
+			}
+			
+			let mut back = Vec::new();
+			
+			while let Some(&value) = it.next_back()
+			{
+				back.push(value);
+			}
+			
+			assert_eq!(None, it.next());
+			assert_eq!(0, it.len());
+			result.extend(back.into_iter().rev());
+			assert_eq!((0 .. size).collect::<Vec<_>>(), result);
+		}
+		
+		// Alternating ends, the values from the front go before the ones from the back
+		let mut it = set.iter();
+		let mut result = Vec::new();
+		let mut front_length = 0;
+		
+		loop
+		{
+			let from_front = result.len() % 2 == 0;
+			let Some(&value) = (if from_front {it.next()} else {it.next_back()}) else {break};
+			result.insert(front_length, value);
+			front_length += from_front as usize;
+		}
+		
+		assert_eq!((0 .. size).collect::<Vec<_>>(), result);
 	}
 }
 

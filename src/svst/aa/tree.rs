@@ -204,8 +204,7 @@ impl TreeBase
 	{
 		node::Iterator
 		{
-			first: self.first,
-			last: self.last,
+			remaining: storage.len(),
 			bounds: [self.first, self.last],
 			nodes: storage.nodes(),
 		}
@@ -591,7 +590,7 @@ where
 		let mut it = self.impl_iter();
 		loop
 		{
-			let i = node::iter_impl!(it, 0);
+			let i = it.advance::<0>();
 			
 			if i == node::Link::NIL
 			{
