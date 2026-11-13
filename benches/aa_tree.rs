@@ -20,6 +20,28 @@ fn shuffled(limit: usize) -> Vec<usize>
 	return result;
 }
 
+// The containers measured by more benchmarks are built on first use, so that the containers of the other benchmarks
+// do not change where the measured one is in memory when benchmarks are selected, which changes the times considerably.
+
+fn tree_set(values: &[usize]) -> AATreeSet<usize>
+{
+	let mut result = AATreeSet::new();
+	for v in values {result.insert(*v);}
+	return result;
+}
+
+fn vec_set(values: &[usize]) -> AAVecSet<usize>
+{
+	let mut result = AAVecSet::new();
+	for v in values {result.insert(*v);}
+	return result;
+}
+
+fn btree_set(values: &[usize]) -> std::collections::BTreeSet<usize>
+{
+	values.iter().copied().collect()
+}
+
 fn bench_set_insert(c: &mut Criterion)
 {
 	for limit in [1_000_usize, 10_000]
@@ -105,16 +127,10 @@ fn bench_set_contains(c: &mut Criterion)
 		let mut rng = rand::rngs::SmallRng::seed_from_u64(1);
 		let keys: Vec<usize> = (0 .. LOOKUPS).map(|_| rng.random_range(0 .. 2 * limit)).collect();
 		
-		let mut s = AATreeSet::new();
-		for v in &values {s.insert(*v);}
-		group.bench_function("AATreeSet", |b| b.iter(|| keys.iter().filter(|k| s.contains(*k)).count()));
-		
-		let mut s = AAVecSet::new();
-		for v in &values {s.insert(*v);}
-		group.bench_function("AAVecSet", |b| b.iter(|| keys.iter().filter(|k| s.contains(*k)).count()));
-		
-		let s: std::collections::BTreeSet<usize> = values.iter().copied().collect();
-		group.bench_function("BTreeSet", |b| b.iter(|| keys.iter().filter(|k| s.contains(*k)).count()));
+		let (mut tree, mut vec, mut btree) = (None, None, None);
+		group.bench_function("AATreeSet", |b| {let s = tree.get_or_insert_with(|| tree_set(&values)); b.iter(|| keys.iter().filter(|k| s.contains(*k)).count())});
+		group.bench_function("AAVecSet", |b| {let s = vec.get_or_insert_with(|| vec_set(&values)); b.iter(|| keys.iter().filter(|k| s.contains(*k)).count())});
+		group.bench_function("BTreeSet", |b| {let s = btree.get_or_insert_with(|| btree_set(&values)); b.iter(|| keys.iter().filter(|k| s.contains(*k)).count())});
 		group.finish();
 	}
 }
@@ -131,16 +147,10 @@ fn bench_set_contains_sequential(c: &mut Criterion)
 		let values: Vec<usize> = shuffled(limit).into_iter().map(|v| 2 * v).collect();
 		let keys: Vec<usize> = (0 .. LOOKUPS).map(|i| i % (2 * limit)).collect();
 		
-		let mut s = AATreeSet::new();
-		for v in &values {s.insert(*v);}
-		group.bench_function("AATreeSet", |b| b.iter(|| keys.iter().filter(|k| s.contains(*k)).count()));
-		
-		let mut s = AAVecSet::new();
-		for v in &values {s.insert(*v);}
-		group.bench_function("AAVecSet", |b| b.iter(|| keys.iter().filter(|k| s.contains(*k)).count()));
-		
-		let s: std::collections::BTreeSet<usize> = values.iter().copied().collect();
-		group.bench_function("BTreeSet", |b| b.iter(|| keys.iter().filter(|k| s.contains(*k)).count()));
+		let (mut tree, mut vec, mut btree) = (None, None, None);
+		group.bench_function("AATreeSet", |b| {let s = tree.get_or_insert_with(|| tree_set(&values)); b.iter(|| keys.iter().filter(|k| s.contains(*k)).count())});
+		group.bench_function("AAVecSet", |b| {let s = vec.get_or_insert_with(|| vec_set(&values)); b.iter(|| keys.iter().filter(|k| s.contains(*k)).count())});
+		group.bench_function("BTreeSet", |b| {let s = btree.get_or_insert_with(|| btree_set(&values)); b.iter(|| keys.iter().filter(|k| s.contains(*k)).count())});
 		group.finish();
 	}
 }
@@ -153,20 +163,14 @@ fn bench_set_iter(c: &mut Criterion)
 		configure(&mut group);
 		let values = shuffled(limit);
 		
-		let mut s = AATreeSet::new();
-		for v in &values {s.insert(*v);}
-		group.bench_function("AATreeSet", |b| b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		group.bench_function("AATreeSet_collect", |b| b.iter(|| s.iter().copied().collect::<Vec<_>>()));
-		group.bench_function("AATreeSet_unordered", |b| b.iter(|| s.iter_unordered().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		
-		let mut s = AAVecSet::new();
-		for v in &values {s.insert(*v);}
-		group.bench_function("AAVecSet", |b| b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		group.bench_function("AAVecSet_unordered", |b| b.iter(|| s.iter_unordered().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		
-		let s: std::collections::BTreeSet<usize> = values.iter().copied().collect();
-		group.bench_function("BTreeSet", |b| b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		group.bench_function("BTreeSet_collect", |b| b.iter(|| s.iter().copied().collect::<Vec<_>>()));
+		let (mut tree, mut vec, mut btree) = (None, None, None);
+		group.bench_function("AATreeSet", |b| {let s = tree.get_or_insert_with(|| tree_set(&values)); b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("AATreeSet_collect", |b| {let s = tree.get_or_insert_with(|| tree_set(&values)); b.iter(|| s.iter().copied().collect::<Vec<_>>())});
+		group.bench_function("AATreeSet_unordered", |b| {let s = tree.get_or_insert_with(|| tree_set(&values)); b.iter(|| s.iter_unordered().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("AAVecSet", |b| {let s = vec.get_or_insert_with(|| vec_set(&values)); b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("AAVecSet_unordered", |b| {let s = vec.get_or_insert_with(|| vec_set(&values)); b.iter(|| s.iter_unordered().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("BTreeSet", |b| {let s = btree.get_or_insert_with(|| btree_set(&values)); b.iter(|| s.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("BTreeSet_collect", |b| {let s = btree.get_or_insert_with(|| btree_set(&values)); b.iter(|| s.iter().copied().collect::<Vec<_>>())});
 		group.finish();
 	}
 }

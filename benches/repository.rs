@@ -35,6 +35,26 @@ fn random_indices(limit: usize, count: usize) -> Vec<usize>
 	return (0 .. count).map(|_| rng.random_range(0 .. limit)).collect();
 }
 
+// The containers measured by more benchmarks are built on first use, so that the containers of the other benchmarks
+// do not change where the measured one is in memory when benchmarks are selected, which changes the times considerably.
+
+fn full_vec(limit: usize) -> Vec<usize>
+{
+	(0 .. limit).collect()
+}
+
+fn full_repository(limit: usize) -> Repository<usize>
+{
+	(0 .. limit).collect()
+}
+
+fn full_free_list(limit: usize) -> FreeListVec<usize>
+{
+	let mut result = FreeListVec::new();
+	for i in 0 .. limit {result.insert(i);}
+	return result;
+}
+
 /// A list of the values `0 .. limit` for which `keep` holds, in their order, whose nodes are allocated
 /// in a pseudo-random order among those of the other values, which are freed then.
 /// Following it jumps across memory, like in a list after many modifications,
@@ -149,10 +169,9 @@ fn bench_get(c: &mut Criterion)
 		let mut group = c.benchmark_group(format!("get_{}", limit));
 		configure(&mut group);
 		let indices = random_indices(limit, LOOKUPS);
-		let v: Vec<usize> = (0 .. limit).collect();
-		let r: Repository<usize> = (0 .. limit).collect();
-		group.bench_function("Vec", |b| b.iter(|| indices.iter().fold(0_usize, |acc, &i| acc.wrapping_add(v[i]))));
-		group.bench_function("Repository", |b| b.iter(|| indices.iter().fold(0_usize, |acc, &i| acc.wrapping_add(r[i]))));
+		let (mut v, mut r) = (None, None);
+		group.bench_function("Vec", |b| {let v = v.get_or_insert_with(|| full_vec(limit)); b.iter(|| indices.iter().fold(0_usize, |acc, &i| acc.wrapping_add(v[i])))});
+		group.bench_function("Repository", |b| {let r = r.get_or_insert_with(|| full_repository(limit)); b.iter(|| indices.iter().fold(0_usize, |acc, &i| acc.wrapping_add(r[i])))});
 		group.finish();
 	}
 }
@@ -164,15 +183,15 @@ fn bench_iter(c: &mut Criterion)
 	{
 		let mut group = c.benchmark_group(format!("iter_{}", limit));
 		configure(&mut group);
-		let v: Vec<usize> = (0 .. limit).collect();
-		let r: Repository<usize> = (0 .. limit).collect();
-		group.bench_function("Vec", |b| b.iter(|| v.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		group.bench_function("Repository", |b| b.iter(|| r.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		let l: LinkedList<usize> = (0 .. limit).collect();
-		group.bench_function("LinkedList", |b| b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		let l = scattered_list(limit, |_| true);
-		assert!(l.iter().copied().eq(0 .. limit));
-		group.bench_function("LinkedList_scattered", |b| b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
+		let (mut v, mut r, mut l, mut scattered) = (None, None, None, None);
+		group.bench_function("Vec", |b| {let v = v.get_or_insert_with(|| full_vec(limit)); b.iter(|| v.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("Repository", |b| {let r = r.get_or_insert_with(|| full_repository(limit)); b.iter(|| r.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("LinkedList", |b| {let l = l.get_or_insert_with(|| (0 .. limit).collect::<LinkedList<usize>>()); b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))});
+		group.bench_function("LinkedList_scattered", |b|
+		{
+			let l = scattered.get_or_insert_with(|| {let l = scattered_list(limit, |_| true); assert!(l.iter().copied().eq(0 .. limit)); l});
+			b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))
+		});
 		group.finish();
 	}
 }
@@ -186,22 +205,26 @@ fn bench_iter_sparse(c: &mut Criterion)
 		let mut group = c.benchmark_group(format!("iter_sparse_{}", limit));
 		configure(&mut group);
 		let removed = &shuffled(limit)[.. limit / 2];
-		
-		let mut r: Repository<usize> = (0 .. limit).collect();
-		for &i in removed {r.remove(i);}
-		group.bench_function("Repository", |b| b.iter(|| r.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		
-		let mut f = FreeListVec::new();
-		for i in 0 .. limit {f.insert(i);}
-		for &i in removed {f.remove(i);}
-		group.bench_function("FreeListVec", |b| b.iter(|| f.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
-		
 		let mut kept = vec![true; limit];
 		for &i in removed {kept[i] = false;}
-		let l = scattered_list(limit, |i| kept[i]);
-		assert!(l.iter().copied().eq((0 .. limit).filter(|&i| kept[i])));
-		assert!(r.iter().copied().eq(l.iter().copied()));
-		group.bench_function("LinkedList_scattered", |b| b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
+		let expected = || (0 .. limit).filter(|&i| kept[i]);
+		let (mut r, mut f, mut l) = (None, None, None);
+		
+		group.bench_function("Repository", |b|
+		{
+			let r = r.get_or_insert_with(|| {let mut r = full_repository(limit); for &i in removed {r.remove(i);} assert!(r.iter().copied().eq(expected())); r});
+			b.iter(|| r.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))
+		});
+		group.bench_function("FreeListVec", |b|
+		{
+			let f = f.get_or_insert_with(|| {let mut f = full_free_list(limit); for &i in removed {f.remove(i);} assert!(f.iter().copied().eq(expected())); f});
+			b.iter(|| f.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))
+		});
+		group.bench_function("LinkedList_scattered", |b|
+		{
+			let l = l.get_or_insert_with(|| {let l = scattered_list(limit, |i| kept[i]); assert!(l.iter().copied().eq(expected())); l});
+			b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v)))
+		});
 		group.finish();
 	}
 }
@@ -214,14 +237,10 @@ fn bench_into_iter(c: &mut Criterion)
 	configure(&mut group);
 	let batch_size = criterion::BatchSize::LargeInput;
 	
-	let v: Vec<usize> = (0 .. limit).collect();
-	group.bench_function("Vec", |b| b.iter_batched(|| v.clone(), |v| v.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size));
-	
-	let r: Repository<usize> = (0 .. limit).collect();
-	group.bench_function("Repository", |b| b.iter_batched(|| r.clone(), |r| r.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size));
-	
-	let l: LinkedList<usize> = (0 .. limit).collect();
-	group.bench_function("LinkedList", |b| b.iter_batched(|| l.clone(), |l| l.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size));
+	let (mut v, mut r, mut l) = (None, None, None);
+	group.bench_function("Vec", |b| {let v = v.get_or_insert_with(|| full_vec(limit)); b.iter_batched(|| v.clone(), |v| v.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size)});
+	group.bench_function("Repository", |b| {let r = r.get_or_insert_with(|| full_repository(limit)); b.iter_batched(|| r.clone(), |r| r.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size)});
+	group.bench_function("LinkedList", |b| {let l = l.get_or_insert_with(|| (0 .. limit).collect::<LinkedList<usize>>()); b.iter_batched(|| l.clone(), |l| l.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size)});
 	group.finish();
 }
 
@@ -237,18 +256,11 @@ fn bench_churn(c: &mut Criterion)
 	configure(&mut group);
 	let indices = random_indices(limit, OPERATIONS);
 	
-	let mut v: Vec<usize> = (0 .. limit).collect();
-	group.bench_function("Vec_swap_remove", |b| b.iter(|| {for &i in &indices {let value = v.swap_remove(i); v.push(value);} v.len()}));
-	
-	let mut r: Repository<usize> = (0 .. limit).collect();
-	group.bench_function("Repository", |b| b.iter(|| {for &i in &indices {let value = r.remove(i).unwrap(); r.insert(value);} r.len()}));
-	
-	let mut f = FreeListVec::new();
-	for i in 0 .. limit {f.insert(i);}
-	group.bench_function("FreeListVec", |b| b.iter(|| {for &i in &indices {let value = f.remove(i).unwrap(); f.insert(value);} f.slots.len()}));
-	
-	let mut l: LinkedList<usize> = (0 .. limit).collect();
-	group.bench_function("LinkedList_pop_push", |b| b.iter(|| {for _ in &indices {let value = l.pop_front().unwrap(); l.push_back(value);} l.len()}));
+	let (mut v, mut r, mut f, mut l) = (None, None, None, None);
+	group.bench_function("Vec_swap_remove", |b| {let v = v.get_or_insert_with(|| full_vec(limit)); b.iter(|| {for &i in &indices {let value = v.swap_remove(i); v.push(value);} v.len()})});
+	group.bench_function("Repository", |b| {let r = r.get_or_insert_with(|| full_repository(limit)); b.iter(|| {for &i in &indices {let value = r.remove(i).unwrap(); r.insert(value);} r.len()})});
+	group.bench_function("FreeListVec", |b| {let f = f.get_or_insert_with(|| full_free_list(limit)); b.iter(|| {for &i in &indices {let value = f.remove(i).unwrap(); f.insert(value);} f.slots.len()})});
+	group.bench_function("LinkedList_pop_push", |b| {let l = l.get_or_insert_with(|| (0 .. limit).collect::<LinkedList<usize>>()); b.iter(|| {for _ in &indices {let value = l.pop_front().unwrap(); l.push_back(value);} l.len()})});
 	group.finish();
 }
 
