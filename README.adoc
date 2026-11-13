@@ -10,7 +10,8 @@ A sparse, index-stable container backed by a flat array.
 Values are accessed by index and their indices remain valid for the lifetime of the container (or until explicitly removed).
 Removal does not shift elements; instead the vacant slot is tracked and reused by the next insertion.
 
-Occupancy metadata is stored as a tree of 64-bit bitsets alongside the values in a single allocation, making `insert` and `remove` amortized _O(log~64~ n)_ -- effectively constant for practical sizes.
+Occupancy metadata is stored as 64-bit bitsets alongside the values in a single allocation.
+Vacant slots are reused before the array grows, preferring the ones near the beginning, with `insert` and `remove` in constant time for values at least as large as `usize` and amortized _O(log~64~ n)_ otherwise -- effectively constant for practical sizes.
 
 === AA tree collections
 

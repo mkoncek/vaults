@@ -5,28 +5,48 @@ use crate::svst::bit_indexing;
 /// A sparse, index-stable container backed by a flat array.
 ///
 /// Unlike [`Vec`], removing a value does not shift subsequent elements.
-/// Instead the vacated slot becomes a hole which is reused by the next [`insert`](Self::insert).
+/// Instead the vacated slot becomes a hole which later [`insert`](Self::insert)s reuse before growing,
+/// preferring holes near the beginning.
 /// This means that the index returned by `insert` remains valid until the value at
 /// that index is explicitly removed -- insertions and removals of *other* values never
 /// invalidate it.
 ///
-/// Occupancy is tracked by a tree of 64-bit bitsets stored in the same allocation as
-/// the values.  `insert` and `remove` are amortized *O*(log_{64} *n*), which is
-/// at most 4 levels for 16 million elements and at most 11 levels for any `usize` range.
+/// Occupancy is tracked by 64-bit bitsets stored in the same allocation as the values.
+/// Values at least as large as `usize` link the vacant slots in lists through their memory, one for each of
+/// at most 64 regions of the slots, and insertion takes a slot of the lowest region with one,
+/// so `insert` and `remove` take constant time.
+/// For smaller values, the bitsets form a tree which insertion uses to find the lowest vacant slot,
+/// so `insert` and `remove` are amortized *O*(log_{64} *n*), which is at most 4 levels for 16 million
+/// elements and at most 11 levels for any `usize` range.
 #[derive(Debug)]
 pub struct Repository<Type>
 {
 	storage: VectorStorage,
 	len: usize,
+	/// The number of words of the index, which the heads of the lists of vacant slots follow if they are linked.
 	index_length: usize,
-	/// All words of the level of the values in the index before this one are full,
+	/// If vacant slots are linked ([`Self::LINKED`]), the slots before this one are occupied or linked and the ones after it were never used.
+	/// Otherwise, all words of the level of the values in the index before this one are full,
 	/// so insertion finds the lowest vacant index without searching the index if this word is not full.
-	first_vacant_word: usize,
+	vacancy: usize,
+	/// If vacant slots are linked, the regions whose lists of vacant slots are not empty.
+	vacant_regions: u64,
 	_data: std::marker::PhantomData<Type>,
 }
 
 impl<Type> Repository<Type>
 {
+	/// Whether the vacant slots are linked in lists through their memory, which needs room for an index.
+	/// The slots are split into at most 64 regions, each with a list, and insertion takes a slot from the lowest region with one,
+	/// which fills the slots near the beginning about as well as taking the lowest vacant slot,
+	/// but without maintaining the levels of the index above the one holding the bits of the values.
+	///
+	/// Otherwise the index has those levels, which insertion uses to find the lowest vacant slot.
+	const LINKED: bool = std::mem::size_of::<Type>() >= std::mem::size_of::<usize>();
+	
+	/// The end of a list of vacant slots.
+	const NIL: usize = usize::MAX;
+	
 	/// Constructs a new, empty `Repository<Type>`.
 	pub const fn new() -> Self
 	{
@@ -35,7 +55,8 @@ impl<Type> Repository<Type>
 			storage: VectorStorage::new::<Type>(),
 			len: 0,
 			index_length: 0,
-			first_vacant_word: 0,
+			vacancy: 0,
+			vacant_regions: 0,
 			_data: std::marker::PhantomData,
 		}
 	}
@@ -98,15 +119,36 @@ impl<Type> Repository<Type>
 	/// Inserts a value in the repository returning its index within the repository.
 	/// The inserted value will remain at the position of the returned index for the whole lifetime of the repository or until the value is explicitly removed.
 	/// # Time complexity
-	/// Amortized _O(log<sub>64</sub> n)_ where _n_ is the number of values in the repository.
+	/// Amortized _O(1)_ for values at least as large as `usize`, otherwise amortized _O(log<sub>64</sub> n)_
+	/// where _n_ is the number of values in the repository.
 	#[inline]
 	pub fn insert(&mut self, value: Type) -> usize
 	{
 		self.reserve(1);
-		let capacity = self.capacity();
-		let mut hint = self.first_vacant_word;
-		let index = bit_indexing::push_front_from(self.index_header_mut(), capacity, &mut hint);
-		self.first_vacant_word = hint;
+		let index;
+		
+		if Self::LINKED
+		{
+			if self.vacant_regions != 0
+			{
+				index = unsafe {self.pop_vacant()};
+			}
+			else
+			{
+				index = self.vacancy;
+				self.vacancy += 1;
+			}
+			
+			let (word, mask) = bit_indexing::indices(index);
+			self.index_header_mut()[word] |= mask;
+		}
+		else
+		{
+			let capacity = self.capacity();
+			let mut hint = self.vacancy;
+			index = bit_indexing::push_front_from(self.index_header_mut(), capacity, &mut hint);
+			self.vacancy = hint;
+		}
 		
 		unsafe {self.values().add(index).write(value)};
 		
@@ -117,16 +159,33 @@ impl<Type> Repository<Type>
 	
 	/// Removes a value at _index_ from the repository, returning it or [None].
 	/// # Time complexity
-	/// _O(log<sub>64</sub> n)_ where _n_ is the number of values in the repository.
+	/// _O(1)_ for values at least as large as `usize`, otherwise _O(log<sub>64</sub> n)_
+	/// where _n_ is the number of values in the repository.
 	#[inline]
 	pub fn remove(&mut self, index: usize) -> Option<Type>
 	{
 		let capacity = self.capacity();
 		let mut result = None;
 		
-		if index < capacity && bit_indexing::erase(self.index_header_mut(), index, capacity)
+		if Self::LINKED
 		{
-			self.first_vacant_word = self.first_vacant_word.min(index / bit_indexing::IndexType::BITS as usize);
+			if index < capacity
+			{
+				let (word, mask) = bit_indexing::indices(index);
+				let words = self.index_header_mut();
+				
+				if words[word] & mask != 0
+				{
+					words[word] &= ! mask;
+					unsafe {result = Some(self.values().add(index).read())};
+					unsafe {self.push_vacant(index)};
+					self.len -= 1;
+				}
+			}
+		}
+		else if index < capacity && bit_indexing::erase(self.index_header_mut(), index, capacity)
+		{
+			self.vacancy = self.vacancy.min(index / bit_indexing::IndexType::BITS as usize);
 			unsafe {result = Some(self.values().add(index).read())};
 			
 			self.len -= 1;
@@ -137,14 +196,25 @@ impl<Type> Repository<Type>
 	
 	/// Removes a value at _index_ from the repository, returning it.
 	/// # Time complexity
-	/// _O(log<sub>64</sub> n)_ where _n_ is the number of values in the repository.
+	/// _O(1)_ for values at least as large as `usize`, otherwise _O(log<sub>64</sub> n)_
+	/// where _n_ is the number of values in the repository.
 	#[inline]
 	pub unsafe fn remove_unchecked(&mut self, index: usize) -> Type
 	{
 		let capacity = self.capacity();
-		bit_indexing::erase(self.index_header_mut(), index, capacity);
-		self.first_vacant_word = self.first_vacant_word.min(index / bit_indexing::IndexType::BITS as usize);
 		self.len -= 1;
+		
+		if Self::LINKED
+		{
+			let (word, mask) = bit_indexing::indices(index);
+			self.index_header_mut()[word] &= ! mask;
+			let result = self.values().add(index).read();
+			self.push_vacant(index);
+			return result;
+		}
+		
+		bit_indexing::erase(self.index_header_mut(), index, capacity);
+		self.vacancy = self.vacancy.min(index / bit_indexing::IndexType::BITS as usize);
 		return self.values().add(index).read();
 	}
 	
@@ -159,7 +229,8 @@ impl<Type> Repository<Type>
 			}
 			
 			self.len = 0;
-			self.first_vacant_word = 0;
+			self.vacancy = 0;
+			self.vacant_regions = 0;
 			self.index_header_mut().fill(0);
 		}
 	}
@@ -257,7 +328,84 @@ impl<Type> Repository<Type>
 		self.storage = VectorStorage::new::<Type>();
 		self.len = 0;
 		self.index_length = 0;
-		self.first_vacant_word = 0;
+		self.vacancy = 0;
+		self.vacant_regions = 0;
+	}
+	
+	/// Returns the logarithm of the number of slots of each region of vacant slots for `capacity` and the number of the regions.
+	/// The regions have at least 64 slots and there are at most 64 of them, so that a word holds which have vacant slots.
+	#[inline]
+	fn regions(capacity: usize) -> (u32, usize)
+	{
+		let size = capacity.div_ceil(64).next_power_of_two().max(64);
+		return (size.trailing_zeros(), capacity.div_ceil(size));
+	}
+	
+	/// Returns the heads of the lists of vacant slots of the regions, which follow the index.
+	#[inline]
+	fn heads(&self) -> *mut usize
+	{
+		let offset = Self::index_offset(self.capacity()) + self.index_length * std::mem::size_of::<bit_indexing::IndexType>();
+		return unsafe {self.storage.data.as_ptr().add(offset).cast::<usize>()};
+	}
+	
+	/// Links the vacant slot `index`, which must be before `vacancy`, at the beginning of the list of its region.
+	#[inline]
+	unsafe fn push_vacant(&mut self, index: usize)
+	{
+		debug_assert!(Self::LINKED && index < self.vacancy);
+		let region = index >> Self::regions(self.capacity()).0;
+		let head = self.heads().add(region);
+		let next = if self.vacant_regions & (1 << region) != 0 {*head} else {Self::NIL};
+		// The slot is vacant, so its memory holds the link
+		self.values().add(index).cast::<usize>().write_unaligned(next);
+		*head = index;
+		self.vacant_regions |= 1 << region;
+	}
+	
+	/// Unlinks the first vacant slot of the lowest region with vacant slots, there must be one.
+	#[inline]
+	unsafe fn pop_vacant(&mut self) -> usize
+	{
+		let region = self.vacant_regions.trailing_zeros() as usize;
+		let head = self.heads().add(region);
+		let index = *head;
+		let next = self.values().add(index).cast::<usize>().read_unaligned();
+		*head = next;
+		
+		if next == Self::NIL
+		{
+			self.vacant_regions &= ! (1 << region);
+		}
+		
+		debug_assert!(index < self.vacancy && ! self.occupied(index));
+		return index;
+	}
+	
+	/// Links all vacant slots before `vacancy` in the lists of their regions, so that each list starts with its lowest slot.
+	unsafe fn link_vacant_slots(&mut self)
+	{
+		const BITS: usize = bit_indexing::IndexType::BITS as usize;
+		self.vacant_regions = 0;
+		
+		for word in (0 .. self.vacancy.div_ceil(BITS)).rev()
+		{
+			let mut vacant = ! self.index_header()[word];
+			
+			// The slots from `vacancy` on were never used
+			if (word + 1) * BITS > self.vacancy
+			{
+				vacant &= (1 << (self.vacancy % BITS)) - 1;
+			}
+			
+			// The highest first, so that the lowest ones end up first in the lists
+			while vacant != 0
+			{
+				let bit = BITS - 1 - vacant.leading_zeros() as usize;
+				self.push_vacant(word * BITS + bit);
+				vacant &= ! (1 << bit);
+			}
+		}
 	}
 	
 	/// Returns the array of the values, which starts the allocation.
@@ -275,7 +423,8 @@ impl<Type> Repository<Type>
 		(std::mem::size_of::<Type>() * capacity).next_multiple_of(std::mem::align_of::<bit_indexing::IndexType>())
 	}
 	
-	/// Returns the layout of the allocation for `capacity` values followed by the index and the length of the index.
+	/// Returns the layout of the allocation for `capacity` values followed by the index, and the heads of the lists of vacant slots
+	/// if they are linked, and the length of the index.
 	/// Panics if the size overflows.
 	fn layout_for(capacity: usize) -> (std::alloc::Layout, usize)
 	{
@@ -283,11 +432,18 @@ impl<Type> Repository<Type>
 			std::mem::align_of::<Type>(),
 			std::mem::align_of::<bit_indexing::IndexType>(),
 		);
-		let index_length = crate::svst::bit_indexing::index_length(capacity);
-		// The index has at most `capacity / 127 + 10` words, so its size does not overflow
+		let (index_length, heads) = if Self::LINKED
+		{
+			(bit_indexing::level_length(capacity), Self::regions(capacity).1)
+		}
+		else
+		{
+			(bit_indexing::index_length(capacity), 0)
+		};
+		// The index has at most `capacity / 63 + 11` words and there are at most 64 heads, so their size does not overflow
 		let byte_size = std::mem::size_of::<Type>().checked_mul(capacity)
 			.and_then(|size| size.checked_next_multiple_of(std::mem::align_of::<bit_indexing::IndexType>()))
-			.and_then(|offset| offset.checked_add(index_length * std::mem::size_of::<bit_indexing::IndexType>()))
+			.and_then(|offset| offset.checked_add(index_length * std::mem::size_of::<bit_indexing::IndexType>() + heads * std::mem::size_of::<usize>()))
 			.expect("capacity overflow")
 		;
 		let layout = std::alloc::Layout::from_size_align(byte_size, alignment).expect("capacity overflow");
@@ -365,13 +521,26 @@ impl<Type> Repository<Type>
 					None => std::slice::from_raw_parts(new_data.as_ptr().add(old_offset).cast::<bit_indexing::IndexType>(), self.index_length),
 				};
 				
-				bit_indexing::copy(old_index, old_capacity, std::slice::from_raw_parts_mut(new_index, index_length), capacity);
+				if Self::LINKED
+				{
+					std::slice::from_raw_parts_mut(new_index, old_index.len()).copy_from_slice(old_index);
+				}
+				else
+				{
+					bit_indexing::copy(old_index, old_capacity, std::slice::from_raw_parts_mut(new_index, index_length), capacity);
+				}
 			}
 		}
 		
 		self.storage.data = new_data;
 		self.storage.capacity = capacity;
 		self.index_length = index_length;
+		
+		// The regions depend on the capacity, so the vacant slots are linked again
+		if Self::LINKED && self.vacant_regions != 0
+		{
+			unsafe {self.link_vacant_slots()};
+		}
 	}
 }
 
@@ -430,12 +599,40 @@ where Type: Clone
 		
 		for index in source.index_iter()
 		{
+			if Self::LINKED
+			{
+				// Linked before the value is written, so that a panicking clone leaves all slots before `vacancy` occupied or linked
+				while self.vacancy < index
+				{
+					let slot = self.vacancy;
+					self.vacancy += 1;
+					unsafe {self.push_vacant(slot)};
+				}
+			}
+			
 			let value = unsafe {source.get_unchecked(index)}.clone();
 			
 			// Each value is marked right after it is written, so that it is dropped if a later clone panics
 			unsafe {self.values().add(index).write(value)};
-			bit_indexing::insert(self.index_header_mut(), index, capacity);
+			
+			if Self::LINKED
+			{
+				let (word, mask) = bit_indexing::indices(index);
+				self.index_header_mut()[word] |= mask;
+				self.vacancy = index + 1;
+			}
+			else
+			{
+				bit_indexing::insert(self.index_header_mut(), index, capacity);
+			}
+			
 			self.len += 1;
+		}
+		
+		// The lowest vacant slots of each region first, like for the source
+		if Self::LINKED && self.vacant_regions != 0
+		{
+			unsafe {self.link_vacant_slots()};
 		}
 	}
 }
@@ -1104,6 +1301,95 @@ fn test_into_iter()
 	drop(it.next());
 	assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(it))).is_err());
 	assert_eq!(1, Rc::strong_count(&counter));
+}
+
+#[test]
+fn test_linked_vacant_slots()
+{
+	// Insertion takes a vacant slot of the lowest region with one, and appends only without vacant slots
+	use rand::{RngExt, SeedableRng};
+	let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+	let mut r = Repository::<u64>::new();
+	let mut slots = Vec::<Option<u64>>::new();
+	let mut occupied = Vec::<usize>::new();
+	let mut vacant = std::collections::BTreeSet::<usize>::new();
+	
+	for step in 0 .. 40_000_u64
+	{
+		// Phases of growth and shrinking
+		let insertion = if step / 2000 % 2 == 0 {0.7} else {0.3};
+		
+		if rng.random_range(0 .. 100) == 0
+		{
+			// Growth with vacant slots, also by one slot, which moves the index onto its old place
+			let additional = if rng.random_bool(0.5) {1} else {rng.random_range(1 .. 1000)};
+			r.reserve_exact(r.capacity() - r.len() + additional);
+		}
+		else if occupied.is_empty() || rng.random_bool(insertion)
+		{
+			let shift = Repository::<u64>::regions(r.capacity()).0;
+			let index = r.insert(step);
+			
+			match vacant.pop_first()
+			{
+				None =>
+				{
+					assert_eq!(slots.len(), index);
+					slots.push(Some(step));
+				},
+				Some(lowest) =>
+				{
+					assert!(index == lowest || vacant.remove(&index), "{} was not vacant", index);
+					
+					if index != lowest
+					{
+						vacant.insert(lowest);
+					}
+					
+					assert_eq!(lowest >> shift, index >> shift, "not from the lowest region with vacant slots");
+					slots[index] = Some(step);
+				},
+			}
+			
+			occupied.push(index);
+		}
+		else
+		{
+			let index = occupied.swap_remove(rng.random_range(0 .. occupied.len()));
+			assert_eq!(slots[index].take(), r.remove(index));
+			assert_eq!(None, r.remove(index));
+			vacant.insert(index);
+		}
+		
+		if step % 1000 == 0
+		{
+			assert_eq!(occupied.len(), r.len());
+			assert!(r.iter().copied().eq(slots.iter().flatten().copied()));
+			assert!(r.index_iter().eq(slots.iter().enumerate().filter(|(_, v)| v.is_some()).map(|(i, _)| i)));
+		}
+	}
+	
+	// Values without the alignment of a link
+	let mut r = Repository::<[u8; 9]>::new();
+	
+	for i in 0 .. 100
+	{
+		assert_eq!(i as usize, r.insert([i; 9]));
+	}
+	
+	for i in (0 .. 100).step_by(7)
+	{
+		assert_eq!(Some([i as u8; 9]), r.remove(i));
+	}
+	
+	for i in (0 .. 100).step_by(7)
+	{
+		let index = r.insert([i as u8; 9]);
+		assert_eq!(Some(&[i as u8; 9]), r.get(index));
+	}
+	
+	assert_eq!(100, r.len());
+	assert!(r.iter().all(|value| value.iter().all(|&byte| byte == value[0])));
 }
 
 #[test]
