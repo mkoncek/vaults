@@ -118,56 +118,28 @@ impl TransientIndexSliceIterator
 	}
 }
 
-pub struct IndexSliceIterator<'t>
-{
-	bitset: &'t [IndexType],
-	it: TransientIndexSliceIterator,
-}
-
-impl<'t> IndexSliceIterator<'t>
-{
-	#[inline]
-	pub fn new(bitset: &'t [IndexType]) -> Self
-	{
-		Self
-		{
-			bitset,
-			it: TransientIndexSliceIterator::new(bitset),
-		}
-	}
-}
-
-impl<'t> Iterator for IndexSliceIterator<'t>
-{
-	type Item = usize;
-	
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item>
-	{
-		self.it.next(self.bitset)
-	}
-}
-
 #[test]
 fn test_index_slice_iterator()
 {
-	assert_eq!(0, IndexSliceIterator::new(&[]).count());
-	assert_eq!(0, IndexSliceIterator::new(&[0]).count());
-	assert_eq!(0, IndexSliceIterator::new(&[0, 0, 0, 0]).count());
-	
+	fn indices(bitset: &[IndexType]) -> Vec<usize>
 	{
-		let range = [0b11010110, 0b11010110];
-		let it = IndexSliceIterator::new(&range);
-		let bits = IndexType::BITS as usize;
-		assert_eq!([1, 2, 4, 6, 7, bits + 1, bits + 2, bits + 4, bits + 6, bits + 7],
-			*it.collect::<Vec<_>>().as_slice()
-		);
+		let mut it = TransientIndexSliceIterator::new(bitset);
+		return std::iter::from_fn(|| it.next(bitset)).collect();
 	}
 	
-	assert_eq!(1, IndexSliceIterator::new(&[1]).count());
-	assert_eq!(1, IndexSliceIterator::new(&[0, 1]).count());
-	assert_eq!(1, IndexSliceIterator::new(&[1, 0]).count());
-	assert_eq!(2, IndexSliceIterator::new(&[1, 1]).count());
+	assert_eq!(0, indices(&[]).len());
+	assert_eq!(0, indices(&[0]).len());
+	assert_eq!(0, indices(&[0, 0, 0, 0]).len());
+	
+	{
+		let bits = IndexType::BITS as usize;
+		assert_eq!(vec![1, 2, 4, 6, 7, bits + 1, bits + 2, bits + 4, bits + 6, bits + 7], indices(&[0b11010110, 0b11010110]));
+	}
+	
+	assert_eq!(1, indices(&[1]).len());
+	assert_eq!(1, indices(&[0, 1]).len());
+	assert_eq!(1, indices(&[1, 0]).len());
+	assert_eq!(2, indices(&[1, 1]).len());
 }
 
 #[inline]

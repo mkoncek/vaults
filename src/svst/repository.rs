@@ -171,9 +171,13 @@ impl<Type> Repository<Type>
 	pub fn is_empty(&self) -> bool {self.len == 0}
 	
 	/// Returns an iterator over the **indices** of values present in the repository.
-	pub fn index_iter(&self) -> impl std::iter::Iterator<Item = usize> + '_
+	pub fn index_iter(&self) -> Indices<'_>
 	{
-		bit_indexing::IndexSliceIterator::new(&self.index_header_leaf())
+		Indices
+		{
+			occupied: Occupied::new(self.index_header_leaf(), self.len),
+			_data: std::marker::PhantomData,
+		}
 	}
 	
 	pub unsafe fn get_unchecked(&self, index: usize) -> &Type
@@ -222,14 +226,14 @@ impl<Type> Repository<Type>
 		return None;
 	}
 	
-	/// Returns an iterator over the values present in the repository.
-	pub fn iter(&self) -> impl std::iter::Iterator<Item = &Type>
+	/// Returns an iterator over the values present in the repository, in the order of their indices.
+	pub fn iter(&self) -> Iter<'_, Type>
 	{
 		self.into_iter()
 	}
 	
-	/// Returns a mutable iterator over the values present in the repository.
-	pub fn iter_mut(&mut self) -> impl std::iter::Iterator<Item = &mut Type>
+	/// Returns a mutable iterator over the values present in the repository, in the order of their indices.
+	pub fn iter_mut(&mut self) -> IterMut<'_, Type>
 	{
 		self.into_iter()
 	}
@@ -436,20 +440,207 @@ impl<Type> FromIterator<Type> for Repository<Type>
 	}
 }
 
+/// A cursor over the occupied indices of a repository in ascending order,
+/// which reads the level of the index holding the bits of the values.
+#[derive(Clone)]
+struct Occupied
+{
+	words: *const bit_indexing::IndexType,
+	word_count: usize,
+	/// The current word and its bits which were not visited yet.
+	word: usize,
+	bits: bit_indexing::IndexType,
+	/// The number of the occupied indices which were not visited yet.
+	remaining: usize,
+}
+
+impl Occupied
+{
+	/// `words` is the level of the values of the index, in which `remaining` bits are set.
+	fn new(words: &[bit_indexing::IndexType], remaining: usize) -> Self
+	{
+		Self
+		{
+			words: words.as_ptr(),
+			word_count: words.len(),
+			word: 0,
+			bits: words.first().copied().unwrap_or(0),
+			remaining,
+		}
+	}
+	
+	/// Moves to the next word, returns `false` if there is none.
+	#[inline]
+	fn next_word(&mut self) -> bool
+	{
+		self.word += 1;
+		
+		if self.word >= self.word_count
+		{
+			return false;
+		}
+		
+		self.bits = unsafe {*self.words.add(self.word)};
+		return true;
+	}
+	
+	#[inline]
+	fn next(&mut self) -> Option<usize>
+	{
+		if self.remaining == 0
+		{
+			return None;
+		}
+		
+		while self.bits == 0
+		{
+			if ! self.next_word()
+			{
+				// Only with an inconsistent number of set bits
+				self.remaining = 0;
+				return None;
+			}
+		}
+		
+		let bit = self.bits.trailing_zeros() as usize;
+		// Clears the lowest set bit, which is cheaper than shifting a 128 bit mask
+		self.bits &= self.bits - 1;
+		self.remaining -= 1;
+		return Some(self.word * bit_indexing::IndexType::BITS as usize + bit);
+	}
+	
+	/// Visits the remaining indices as runs of consecutive ones, calling `function(accumulator, first, count)`
+	/// with the whole word if it is full and with single indices otherwise.
+	#[inline]
+	fn fold<Acc>(mut self, mut accumulator: Acc, mut function: impl FnMut(Acc, usize, usize) -> Acc) -> Acc
+	{
+		const BITS: usize = bit_indexing::IndexType::BITS as usize;
+		
+		while self.remaining != 0
+		{
+			if self.bits == bit_indexing::IndexType::MAX
+			{
+				accumulator = function(accumulator, self.word * BITS, BITS);
+				self.remaining -= BITS;
+			}
+			else
+			{
+				while self.bits != 0
+				{
+					accumulator = function(accumulator, self.word * BITS + self.bits.trailing_zeros() as usize, 1);
+					self.bits &= self.bits - 1;
+					self.remaining -= 1;
+				}
+			}
+			
+			if ! self.next_word()
+			{
+				break;
+			}
+		}
+		
+		return accumulator;
+	}
+}
+
+/// An iterator over the occupied indices of a repository in ascending order.
+pub struct Indices<'t>
+{
+	occupied: Occupied,
+	_data: std::marker::PhantomData<&'t bit_indexing::IndexType>,
+}
+
+// It only reads the words of the index
+unsafe impl<'t> Send for Indices<'t> {}
+unsafe impl<'t> Sync for Indices<'t> {}
+
+impl<'t> Clone for Indices<'t>
+{
+	fn clone(&self) -> Self
+	{
+		Self {occupied: self.occupied.clone(), _data: std::marker::PhantomData}
+	}
+}
+
+impl<'t> std::iter::Iterator for Indices<'t>
+{
+	type Item = usize;
+	
+	#[inline]
+	fn next(&mut self) -> Option<Self::Item>
+	{
+		self.occupied.next()
+	}
+	
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		(self.occupied.remaining, Some(self.occupied.remaining))
+	}
+}
+
+impl<'t> std::iter::ExactSizeIterator for Indices<'t> {}
+impl<'t> std::iter::FusedIterator for Indices<'t> {}
+
+/// An iterator over the values of a repository in the order of their indices.
 pub struct Iter<'t, Type>
 {
-	it: bit_indexing::TransientIndexSliceIterator,
-	repository: &'t Repository<Type>,
+	occupied: Occupied,
+	values: *const Type,
+	_data: std::marker::PhantomData<&'t Type>,
+}
+
+// Like a slice iterator, it only shares the values
+unsafe impl<'t, Type: Sync> Send for Iter<'t, Type> {}
+unsafe impl<'t, Type: Sync> Sync for Iter<'t, Type> {}
+
+impl<'t, Type> Clone for Iter<'t, Type>
+{
+	fn clone(&self) -> Self
+	{
+		Self {occupied: self.occupied.clone(), values: self.values, _data: std::marker::PhantomData}
+	}
 }
 
 impl<'t, Type> std::iter::Iterator for Iter<'t, Type>
 {
 	type Item = &'t Type;
+	
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item>
 	{
-		self.it.next(self.repository.index_header_leaf()).map(move |i| &self.repository[i])
+		let index = self.occupied.next()?;
+		// Sound, since the bit of the index is set
+		return Some(unsafe {&*self.values.add(index)});
+	}
+	
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		(self.occupied.remaining, Some(self.occupied.remaining))
+	}
+	
+	fn count(self) -> usize
+	{
+		self.occupied.remaining
+	}
+	
+	#[inline]
+	fn fold<Acc, Function>(self, accumulator: Acc, mut function: Function) -> Acc
+	where
+		Function: FnMut(Acc, Self::Item) -> Acc,
+	{
+		let values = self.values;
+		
+		// The values of a full word are consecutive, so they are visited as a slice, which the compiler can vectorize
+		self.occupied.fold(accumulator, |accumulator, first, count|
+			unsafe {std::slice::from_raw_parts(values.add(first), count)}.iter().fold(accumulator, &mut function)
+		)
 	}
 }
+
+impl<'t, Type> std::iter::ExactSizeIterator for Iter<'t, Type> {}
+impl<'t, Type> std::iter::FusedIterator for Iter<'t, Type> {}
 
 impl<'t, Type> IntoIterator for &'t Repository<Type>
 {
@@ -458,32 +649,65 @@ impl<'t, Type> IntoIterator for &'t Repository<Type>
 	
 	fn into_iter(self) -> Self::IntoIter
 	{
-		Self::IntoIter
+		Iter
 		{
-			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
-			repository: self,
+			occupied: Occupied::new(self.index_header_leaf(), self.len),
+			values: self.values(),
+			_data: std::marker::PhantomData,
 		}
 	}
 }
 
+/// A mutable iterator over the values of a repository in the order of their indices.
 pub struct IterMut<'t, Type>
 {
-	it: bit_indexing::TransientIndexSliceIterator,
-	repository: &'t mut Repository<Type>,
+	occupied: Occupied,
+	values: *mut Type,
+	_data: std::marker::PhantomData<&'t mut Type>,
 }
+
+// Like a mutable slice iterator
+unsafe impl<'t, Type: Send> Send for IterMut<'t, Type> {}
+unsafe impl<'t, Type: Sync> Sync for IterMut<'t, Type> {}
 
 impl<'t, Type> std::iter::Iterator for IterMut<'t, Type>
 {
 	type Item = &'t mut Type;
+	
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item>
 	{
-		let Some(i) = self.it.next(self.repository.index_header_leaf()) else
-		{
-			return None;
-		};
-		unsafe {Some(std::ptr::addr_of_mut!(self.repository[i]).as_mut().unwrap())}
+		let index = self.occupied.next()?;
+		// Sound, since the bit of the index is set and each index is visited once
+		return Some(unsafe {&mut *self.values.add(index)});
+	}
+	
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		(self.occupied.remaining, Some(self.occupied.remaining))
+	}
+	
+	fn count(self) -> usize
+	{
+		self.occupied.remaining
+	}
+	
+	#[inline]
+	fn fold<Acc, Function>(self, accumulator: Acc, mut function: Function) -> Acc
+	where
+		Function: FnMut(Acc, Self::Item) -> Acc,
+	{
+		let values = self.values;
+		
+		self.occupied.fold(accumulator, |accumulator, first, count|
+			unsafe {std::slice::from_raw_parts_mut(values.add(first), count)}.iter_mut().fold(accumulator, &mut function)
+		)
 	}
 }
+
+impl<'t, Type> std::iter::ExactSizeIterator for IterMut<'t, Type> {}
+impl<'t, Type> std::iter::FusedIterator for IterMut<'t, Type> {}
 
 impl<'t, Type> IntoIterator for &'t mut Repository<Type>
 {
@@ -492,10 +716,11 @@ impl<'t, Type> IntoIterator for &'t mut Repository<Type>
 	
 	fn into_iter(self) -> Self::IntoIter
 	{
-		Self::IntoIter
+		IterMut
 		{
-			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
-			repository: self,
+			occupied: Occupied::new(self.index_header_leaf(), self.len),
+			values: self.values(),
+			_data: std::marker::PhantomData,
 		}
 	}
 }
@@ -725,6 +950,51 @@ fn test_insert_lowest_vacant()
 	assert_eq!(end - vacant.len(), r.len());
 	r.clear();
 	assert_eq!(0, r.insert(0));
+}
+
+#[test]
+fn test_iterators()
+{
+	// Full, sparse and empty words of the index
+	let mut r = Repository::new();
+	
+	for i in 0 .. 1000
+	{
+		r.insert(i);
+	}
+	
+	for i in (256 .. 512).chain((600 .. 1000).filter(|i| i % 3 != 0))
+	{
+		r.remove(i);
+	}
+	
+	let expected: Vec<usize> = (0 .. 256).chain(512 .. 600).chain((600 .. 1000).filter(|i| i % 3 == 0)).collect();
+	assert!(r.iter().copied().eq(expected.iter().copied()));
+	assert_eq!(expected.iter().sum::<usize>(), r.iter().sum::<usize>());
+	assert_eq!(expected.len(), r.iter().count());
+	assert_eq!(expected.len(), r.iter().len());
+	assert!(r.index_iter().eq(expected.iter().copied()));
+	
+	// Folding after visiting a part of a word
+	for skip in [0, 1, 127, 128, 129, 300, expected.len() - 1, expected.len()]
+	{
+		let mut it = r.iter();
+		let visited: Vec<usize> = it.by_ref().take(skip).copied().collect();
+		assert_eq!(expected.len() - skip, it.len());
+		let rest = it.fold(Vec::new(), |mut values, value| {values.push(*value); values});
+		assert_eq!(expected, [visited, rest].concat());
+	}
+	
+	r.iter_mut().for_each(|value| *value *= 2);
+	
+	for value in &mut r
+	{
+		*value += 1;
+	}
+	
+	assert!(r.iter().copied().eq(expected.iter().map(|value| 2 * value + 1)));
+	assert_eq!(None, Repository::<u8>::new().iter().next());
+	assert_eq!(0, Repository::<u8>::new().iter_mut().fold(0, |count, _| count + 1));
 }
 
 #[test]

@@ -62,11 +62,11 @@ impl<Type> TreeStorage<Type> for Repository<node::Node<Type>>
 		self.insert(value)
 	}
 	
-	type Positions<'t> = bit_indexing::IndexSliceIterator<'t> where Self: 't;
+	type Positions<'t> = crate::svst::repository::Indices<'t> where Self: 't;
 	
 	fn positions(&self) -> Self::Positions<'_>
 	{
-		bit_indexing::IndexSliceIterator::new(self.index_header_leaf())
+		self.index_iter()
 	}
 }
 
