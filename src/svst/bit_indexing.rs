@@ -245,34 +245,52 @@ fn test_contains()
 }
 
 #[inline]
-pub fn erase(mut index_span: &mut [IndexType], mut position: usize, mut size: usize) -> bool
+pub fn erase(index_span: &mut [IndexType], position: usize, size: usize) -> bool
 {
-	let mut result = false;
+	let length = level_length(size);
+	let offset = index_span.len() - length;
+	let word_position = position / IndexType::BITS as usize;
+	let mask: IndexType = 1 << (position % IndexType::BITS as usize);
+	let word = &mut index_span[offset + word_position];
+	let previous = *word;
 	
-	loop
+	if previous & mask == 0
 	{
-		size = level_length(size);
+		return false;
+	}
+	
+	*word = previous & ! mask;
+	
+	// Only a full word has its bit set in the level above
+	if previous == IndexType::MAX
+	{
+		clear_full(index_span, length, offset, word_position);
+	}
+	
+	return true;
+}
+
+/// Clears the bits of the word at `position` in the level of `length` words starting at `offset`, which was full,
+/// in the levels above, as long as the words there were full too.
+#[cold]
+#[inline(never)]
+fn clear_full(index_span: &mut [IndexType], mut length: usize, mut offset: usize, mut position: usize)
+{
+	while length > 1
+	{
 		let modulus = position % IndexType::BITS as usize;
 		position /= IndexType::BITS as usize;
-		let level_begin = index_span.len() - size;
+		length = level_length(length);
+		offset -= length;
+		let parent = &mut index_span[offset + position];
+		let previous = *parent;
+		*parent = previous & ! (1 << modulus);
 		
-		if index_span[level_begin + position] & (1 << modulus) == 0
-		{
-			break;
-		}
-		
-		result = true;
-		
-		index_span[level_begin + position] &= ! (1 << modulus);
-		index_span = &mut index_span[.. level_begin];
-		
-		if size <= 1
+		if previous != IndexType::MAX
 		{
 			break;
 		}
 	}
-	
-	return result;
 }
 
 #[test]
@@ -382,7 +400,17 @@ pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
 		offset += level_length_at(size, level + 1);
 	}
 	
-	return position * IndexType::BITS as usize + mark_lowest(index_span, size, depth, offset, position);
+	let word = &mut index_span[offset + position];
+	let bit = word.trailing_ones() as usize;
+	// Sets the lowest clear bit without shifting a mask
+	*word |= *word + 1;
+	
+	if *word == IndexType::MAX
+	{
+		mark_full(index_span, level_length(size), offset, position);
+	}
+	
+	return position * IndexType::BITS as usize + bit;
 }
 
 /// Like [`push_front`], but looks at the word `hint` of the level of the values first, before which all words must be full,
@@ -390,48 +418,55 @@ pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
 #[inline]
 pub fn push_front_from(index_span: &mut [IndexType], size: usize, hint: &mut usize) -> usize
 {
-	let offset = index_span.len() - level_length_at(size, 0);
+	let length = level_length(size);
+	let offset = index_span.len() - length;
+	let word = &mut index_span[offset + *hint];
 	
 	// The lowest clear bit of the word is the lowest one of all, since the words before it are full
-	if index_span[offset + *hint] != IndexType::MAX
+	if *word != IndexType::MAX
 	{
-		return *hint * IndexType::BITS as usize + mark_lowest(index_span, size, depth(size), offset, *hint);
+		let bit = word.trailing_ones() as usize;
+		// Sets the lowest clear bit without shifting a mask
+		*word |= *word + 1;
+		
+		if *word == IndexType::MAX
+		{
+			mark_full(index_span, length, offset, *hint);
+		}
+		
+		return *hint * IndexType::BITS as usize + bit;
 	}
 	
+	return push_front_searching(index_span, size, hint);
+}
+
+/// The part of [`push_front_from`] when the word `hint` is full.
+#[cold]
+#[inline(never)]
+fn push_front_searching(index_span: &mut [IndexType], size: usize, hint: &mut usize) -> usize
+{
 	let result = push_front(index_span, size);
 	*hint = result / IndexType::BITS as usize;
 	return result;
 }
 
-/// Marks the lowest clear bit of the word at `position` in the level of the values, which starts at `offset`,
-/// and the bits of the words in the levels above which become full, returns the position of the marked bit.
-/// The words before the marked ones in each level must be full.
-#[inline]
-fn mark_lowest(index_span: &mut [IndexType], size: usize, depth: u32, mut offset: usize, mut position: usize) -> usize
+/// Marks the bits of the word at `position` in the level of `length` words starting at `offset`, which became full,
+/// in the levels above, as long as the words there become full too.
+#[cold]
+#[inline(never)]
+fn mark_full(index_span: &mut [IndexType], mut length: usize, mut offset: usize, mut position: usize)
 {
-	let word = &mut index_span[offset + position];
-	let result = word.trailing_ones() as usize;
-	// Sets the lowest clear bit without shifting a mask
-	*word |= *word + 1;
-	
-	// Mark the full words in the levels above
-	for level in 0 .. depth
+	while length > 1 && index_span[offset + position] == IndexType::MAX
 	{
-		if ! index_span[offset + position] != 0
-		{
-			break;
-		}
-		
 		let modulus = position % IndexType::BITS as usize;
 		position /= IndexType::BITS as usize;
-		offset -= level_length_at(size, level + 1);
+		length = level_length(length);
+		offset -= length;
 		let parent = &mut index_span[offset + position];
 		// The bit of the full word is the lowest clear one, since the words before it are full
 		debug_assert_eq!(modulus, parent.trailing_ones() as usize);
 		*parent |= *parent + 1;
 	}
-	
-	return result;
 }
 
 #[test]
