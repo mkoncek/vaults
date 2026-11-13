@@ -206,6 +206,25 @@ fn bench_iter_sparse(c: &mut Criterion)
 	}
 }
 
+/// Iteration moving the values out of a full container, which frees it afterwards.
+fn bench_into_iter(c: &mut Criterion)
+{
+	let limit = 100_000;
+	let mut group = c.benchmark_group(format!("into_iter_{}", limit));
+	configure(&mut group);
+	let batch_size = criterion::BatchSize::LargeInput;
+	
+	let v: Vec<usize> = (0 .. limit).collect();
+	group.bench_function("Vec", |b| b.iter_batched(|| v.clone(), |v| v.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size));
+	
+	let r: Repository<usize> = (0 .. limit).collect();
+	group.bench_function("Repository", |b| b.iter_batched(|| r.clone(), |r| r.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size));
+	
+	let l: LinkedList<usize> = (0 .. limit).collect();
+	group.bench_function("LinkedList", |b| b.iter_batched(|| l.clone(), |l| l.into_iter().fold(0_usize, |acc, v| acc.wrapping_add(v)), batch_size));
+	group.finish();
+}
+
 /// Removals at random indices of a full container, each followed by an insertion, which reuses the vacated slot.
 /// `Vec::swap_remove` is the cheapest removal of `Vec`, but moves the last value to the removed index.
 /// A list cannot remove at a position in constant time with the stable interface, so it removes the first
@@ -235,6 +254,6 @@ fn bench_churn(c: &mut Criterion)
 
 criterion_group!(benches,
 	bench_push, bench_push_reserved, bench_get,
-	bench_iter, bench_iter_sparse, bench_churn,
+	bench_iter, bench_iter_sparse, bench_into_iter, bench_churn,
 );
 criterion_main!(benches);
