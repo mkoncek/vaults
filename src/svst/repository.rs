@@ -193,16 +193,9 @@ impl<Type> Repository<Type>
 	#[inline]
 	pub fn get(&self, index: usize) -> Option<&Type>
 	{
-		if index < self.capacity()
+		if index < self.capacity() && self.occupied(index)
 		{
-			let (slice_idx, mask) = bit_indexing::indices(index);
-			unsafe
-			{
-				if self.index_header_leaf().get_unchecked(slice_idx) & mask != 0
-				{
-					return Some(self.as_slice().get_unchecked(index));
-				}
-			}
+			return Some(unsafe {&*self.values().add(index)});
 		}
 		
 		return None;
@@ -211,19 +204,22 @@ impl<Type> Repository<Type>
 	#[inline]
 	pub fn get_mut(&mut self, index: usize) -> Option<&mut Type>
 	{
-		if index < self.capacity()
+		if index < self.capacity() && self.occupied(index)
 		{
-			let (slice_idx, mask) = bit_indexing::indices(index);
-			unsafe
-			{
-				if self.index_header_leaf().get_unchecked(slice_idx) & mask != 0
-				{
-					return Some(self.as_mut_slice().get_unchecked_mut(index));
-				}
-			}
+			return Some(unsafe {&mut *self.values().add(index)});
 		}
 		
 		return None;
+	}
+	
+	/// Returns whether there is a value at `index`, which must be lower than the capacity.
+	#[inline]
+	fn occupied(&self, index: usize) -> bool
+	{
+		let (word, mask) = bit_indexing::indices(index);
+		// The level of the values ends the index, with a word for each `IndexType::BITS` slots of the capacity
+		let leaf = self.index_length - bit_indexing::level_length(self.capacity());
+		return unsafe {*self.index_header().as_ptr().add(leaf + word)} & mask != 0;
 	}
 	
 	/// Returns an iterator over the values present in the repository, in the order of their indices.
@@ -764,41 +760,27 @@ impl<Type> std::ops::Index<usize> for Repository<Type>
 {
 	type Output = Type;
 	
+	#[inline]
 	fn index(&self, index: usize) -> &Self::Output
 	{
-		if index < self.capacity()
+		match self.get(index)
 		{
-			let (slice_idx, mask) = bit_indexing::indices(index);
-			unsafe
-			{
-				if self.index_header_leaf().get_unchecked(slice_idx) & mask != 0
-				{
-					return self.as_slice().get_unchecked(index);
-				}
-			}
+			Some(value) => value,
+			None => panic!("index {} contains an invalid value", index),
 		}
-		
-		panic!("index {} contains an invalid value", index);
 	}
 }
 
 impl<Type> std::ops::IndexMut<usize> for Repository<Type>
 {
+	#[inline]
 	fn index_mut(&mut self, index: usize) -> &mut Self::Output
 	{
-		if index < self.capacity()
+		match self.get_mut(index)
 		{
-			let (slice_idx, mask) = bit_indexing::indices(index);
-			unsafe
-			{
-				if self.index_header_leaf().get_unchecked(slice_idx) & mask != 0
-				{
-					return self.as_mut_slice().get_unchecked_mut(index);
-				}
-			}
+			Some(value) => value,
+			None => panic!("index {} contains an invalid value", index),
 		}
-		
-		panic!("index {} contains an invalid value", index);
 	}
 }
 
