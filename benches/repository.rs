@@ -1,5 +1,8 @@
-//! Benchmarks of `Repository` against `Vec` in the operations they share, and against a vector of
-//! optional values with a list of vacant slots, the usual way to keep indices stable with a `Vec`.
+//! Benchmarks of `Repository` against `Vec` in the operations they share, against a vector of
+//! optional values with a list of vacant slots, the usual way to keep indices stable with a `Vec`,
+//! and against `LinkedList`, whose nodes do not move either.
+//!
+//! A list has no indexing and no capacity, so it is missing from the reads and the reserved appending.
 //!
 //! The benchmarks which allocate are sensitive to the state the allocator is left in by the previous
 //! ones, so for comparisons run each group in its own process, e.g. `cargo bench --bench repository -- '^push_100000/'`.
@@ -7,6 +10,7 @@
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkGroup, measurement::WallTime};
 use rand::{RngExt, SeedableRng};
 use rand::seq::SliceRandom;
+use std::collections::LinkedList;
 use vaults::svst::Repository;
 
 fn configure(group: &mut BenchmarkGroup<WallTime>)
@@ -29,6 +33,33 @@ fn random_indices(limit: usize, count: usize) -> Vec<usize>
 {
 	let mut rng = rand::rngs::SmallRng::seed_from_u64(1);
 	return (0 .. count).map(|_| rng.random_range(0 .. limit)).collect();
+}
+
+/// A list of the values `0 .. limit` for which `keep` holds, in their order, whose nodes are allocated
+/// in a pseudo-random order among those of the other values, which are freed then.
+/// Following it jumps across memory, like in a list after many modifications,
+/// while the nodes of a list built in order are mostly consecutive.
+fn scattered_list(limit: usize, keep: impl Fn(usize) -> bool) -> LinkedList<usize>
+{
+	let mut singles: Vec<LinkedList<usize>> = (0 .. limit).map(|_| LinkedList::new()).collect();
+	
+	for i in shuffled(limit)
+	{
+		singles[i].push_back(i);
+	}
+	
+	// Appending moves the nodes without allocating them again
+	let mut result = LinkedList::new();
+	
+	for (i, mut single) in singles.into_iter().enumerate()
+	{
+		if keep(i)
+		{
+			result.append(&mut single);
+		}
+	}
+	
+	return result;
 }
 
 /// A vector of optional values with a list of the vacant slots, which keeps the indices of the values stable
@@ -81,7 +112,7 @@ impl<Type> FreeListVec<Type>
 	}
 }
 
-/// Appending to an empty container, including its growth.
+/// Appending to an empty container, including its growth and dropping it, which frees every node of a list.
 fn bench_push(c: &mut Criterion)
 {
 	for limit in [1_000_usize, 100_000, 1_000_000]
@@ -90,6 +121,7 @@ fn bench_push(c: &mut Criterion)
 		configure(&mut group);
 		group.bench_function("Vec", |b| b.iter(|| {let mut v = Vec::new(); for i in 0 .. limit {v.push(i);} v}));
 		group.bench_function("Repository", |b| b.iter(|| {let mut r = Repository::new(); for i in 0 .. limit {r.insert(i);} r}));
+		group.bench_function("LinkedList", |b| b.iter(|| {let mut l = LinkedList::new(); for i in 0 .. limit {l.push_back(i);} l}));
 		group.finish();
 	}
 }
@@ -125,7 +157,7 @@ fn bench_get(c: &mut Criterion)
 	}
 }
 
-/// Iteration over all values of a full container.
+/// Iteration over all values of a full container, for lists also with scattered nodes.
 fn bench_iter(c: &mut Criterion)
 {
 	for limit in [1_000_usize, 100_000]
@@ -136,6 +168,11 @@ fn bench_iter(c: &mut Criterion)
 		let r: Repository<usize> = (0 .. limit).collect();
 		group.bench_function("Vec", |b| b.iter(|| v.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
 		group.bench_function("Repository", |b| b.iter(|| r.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
+		let l: LinkedList<usize> = (0 .. limit).collect();
+		group.bench_function("LinkedList", |b| b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
+		let l = scattered_list(limit, |_| true);
+		assert!(l.iter().copied().eq(0 .. limit));
+		group.bench_function("LinkedList_scattered", |b| b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
 		group.finish();
 	}
 }
@@ -158,12 +195,21 @@ fn bench_iter_sparse(c: &mut Criterion)
 		for i in 0 .. limit {f.insert(i);}
 		for &i in removed {f.remove(i);}
 		group.bench_function("FreeListVec", |b| b.iter(|| f.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
+		
+		let mut kept = vec![true; limit];
+		for &i in removed {kept[i] = false;}
+		let l = scattered_list(limit, |i| kept[i]);
+		assert!(l.iter().copied().eq((0 .. limit).filter(|&i| kept[i])));
+		assert!(r.iter().copied().eq(l.iter().copied()));
+		group.bench_function("LinkedList_scattered", |b| b.iter(|| l.iter().fold(0_usize, |acc, v| acc.wrapping_add(*v))));
 		group.finish();
 	}
 }
 
 /// Removals at random indices of a full container, each followed by an insertion, which reuses the vacated slot.
 /// `Vec::swap_remove` is the cheapest removal of `Vec`, but moves the last value to the removed index.
+/// A list cannot remove at a position in constant time with the stable interface, so it removes the first
+/// value and appends it, which frees a node, allocates one and links it like a removal and an insertion.
 fn bench_churn(c: &mut Criterion)
 {
 	const OPERATIONS: usize = 10_000;
@@ -181,6 +227,9 @@ fn bench_churn(c: &mut Criterion)
 	let mut f = FreeListVec::new();
 	for i in 0 .. limit {f.insert(i);}
 	group.bench_function("FreeListVec", |b| b.iter(|| {for &i in &indices {let value = f.remove(i).unwrap(); f.insert(value);} f.slots.len()}));
+	
+	let mut l: LinkedList<usize> = (0 .. limit).collect();
+	group.bench_function("LinkedList_pop_push", |b| b.iter(|| {for _ in &indices {let value = l.pop_front().unwrap(); l.push_back(value);} l.len()}));
 	group.finish();
 }
 
