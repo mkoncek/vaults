@@ -242,6 +242,24 @@ impl<Type> Repository<Type>
 		}
 	}
 	
+	/// Frees the allocation without dropping the values and leaves the repository empty.
+	///
+	/// # Safety
+	/// The values must have been moved out or dropped already.
+	unsafe fn free_without_dropping(&mut self)
+	{
+		if self.capacity() != 0
+		{
+			std::alloc::dealloc(self.storage.data.as_ptr(), Self::layout_for(self.capacity()).0);
+		}
+		
+		// Not by assigning a new repository, which would drop this one
+		self.storage = VectorStorage::new::<Type>();
+		self.len = 0;
+		self.index_length = 0;
+		self.first_vacant_word = 0;
+	}
+	
 	/// Returns the array of the values, which starts the allocation.
 	#[inline]
 	fn values(&self) -> *mut Type
@@ -721,23 +739,62 @@ impl<'t, Type> IntoIterator for &'t mut Repository<Type>
 	}
 }
 
+/// An iterator moving the values out of a repository in the order of their indices.
 pub struct IterVal<Type>
 {
-	it: bit_indexing::TransientIndexSliceIterator,
+	/// Visits the indices whose values were not moved out yet, the index is not updated.
+	occupied: Occupied,
 	repository: Repository<Type>,
 }
 
 impl<Type> std::iter::Iterator for IterVal<Type>
 {
 	type Item = Type;
+	
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item>
 	{
-		let Some(i) = self.it.next(self.repository.index_header_leaf()) else
-		{
-			return None;
-		};
+		let index = self.occupied.next()?;
+		// Sound, since the bit of the index is set and each index is visited once
+		return Some(unsafe {self.repository.values().add(index).read()});
+	}
+	
+	#[inline]
+	fn size_hint(&self) -> (usize, Option<usize>)
+	{
+		(self.occupied.remaining, Some(self.occupied.remaining))
+	}
+}
+
+impl<Type> std::iter::ExactSizeIterator for IterVal<Type> {}
+impl<Type> std::iter::FusedIterator for IterVal<Type> {}
+
+impl<Type> Drop for IterVal<Type>
+{
+	fn drop(&mut self)
+	{
+		/// Frees the allocation without dropping the values even if dropping one of them panics,
+		/// the values after it are leaked then.
+		struct Guard<'t, Type>(&'t mut IterVal<Type>);
 		
-		unsafe {Some(self.repository.remove_unchecked(i))}
+		impl<'t, Type> Drop for Guard<'t, Type>
+		{
+			fn drop(&mut self)
+			{
+				// Sound, since all values were moved out or dropped, except the leaked ones
+				unsafe {self.0.repository.free_without_dropping()};
+			}
+		}
+		
+		let guard = Guard(self);
+		
+		if std::mem::needs_drop::<Type>()
+		{
+			while let Some(index) = guard.0.occupied.next()
+			{
+				unsafe {guard.0.repository.values().add(index).drop_in_place()};
+			}
+		}
 	}
 }
 
@@ -748,9 +805,9 @@ impl<Type> IntoIterator for Repository<Type>
 	
 	fn into_iter(self) -> Self::IntoIter
 	{
-		Self::IntoIter
+		IterVal
 		{
-			it: bit_indexing::TransientIndexSliceIterator::new(self.index_header_leaf()),
+			occupied: Occupied::new(self.index_header_leaf(), self.len),
 			repository: self,
 		}
 	}
@@ -977,6 +1034,76 @@ fn test_iterators()
 	assert!(r.iter().copied().eq(expected.iter().map(|value| 2 * value + 1)));
 	assert_eq!(None, Repository::<u8>::new().iter().next());
 	assert_eq!(0, Repository::<u8>::new().iter_mut().fold(0, |count, _| count + 1));
+}
+
+#[test]
+fn test_into_iter()
+{
+	use std::rc::Rc;
+	
+	let counter = Rc::new(());
+	let removed = |i: usize| i % 3 == 0 || (128 .. 192).contains(&i);
+	let make = ||
+	{
+		let mut r = Repository::new();
+		
+		for i in 0 .. 300
+		{
+			r.insert((i, counter.clone()));
+		}
+		
+		for i in (0 .. 300).filter(|&i| removed(i))
+		{
+			r.remove(i);
+		}
+		
+		r
+	};
+	let expected: Vec<usize> = (0 .. 300).filter(|&i| ! removed(i)).collect();
+	
+	assert_eq!(expected, make().into_iter().map(|(i, _)| i).collect::<Vec<_>>());
+	assert_eq!(1, Rc::strong_count(&counter));
+	
+	// Dropping the iterator drops each remaining value once
+	for consumed in [0, 1, 50, expected.len()]
+	{
+		let mut it = make().into_iter();
+		assert_eq!(expected.len(), it.len());
+		let taken: Vec<_> = it.by_ref().take(consumed).collect();
+		assert_eq!(expected.len() - consumed, it.len());
+		drop(it);
+		assert_eq!(1 + consumed, Rc::strong_count(&counter));
+		drop(taken);
+		assert_eq!(1, Rc::strong_count(&counter));
+	}
+	
+	// A panic while dropping a remaining value still frees the allocation, without dropping any value twice
+	enum Value
+	{
+		Counted(#[allow(dead_code)] Rc<()>),
+		Bomb,
+	}
+	
+	impl Drop for Value
+	{
+		fn drop(&mut self)
+		{
+			assert!(! matches!(self, Value::Bomb), "bomb");
+		}
+	}
+	
+	let mut r = Repository::new();
+	
+	for _ in 0 .. 9
+	{
+		r.insert(Value::Counted(counter.clone()));
+	}
+	
+	r.insert(Value::Bomb);
+	let mut it = r.into_iter();
+	drop(it.next());
+	assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || drop(it))).is_err());
+	assert_eq!(1, Rc::strong_count(&counter));
 }
 
 #[test]
