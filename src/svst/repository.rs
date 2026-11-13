@@ -19,6 +19,9 @@ pub struct Repository<Type>
 	storage: VectorStorage,
 	len: usize,
 	index_length: usize,
+	/// All words of the level of the values in the index before this one are full,
+	/// so insertion finds the lowest vacant index without searching the index if this word is not full.
+	first_vacant_word: usize,
 	_data: std::marker::PhantomData<Type>,
 }
 
@@ -32,6 +35,7 @@ impl<Type> Repository<Type>
 			storage: VectorStorage::new::<Type>(),
 			len: 0,
 			index_length: 0,
+			first_vacant_word: 0,
 			_data: std::marker::PhantomData,
 		}
 	}
@@ -100,7 +104,9 @@ impl<Type> Repository<Type>
 	{
 		self.reserve(1);
 		let capacity = self.capacity();
-		let index = bit_indexing::push_front(self.index_header_mut(), capacity);
+		let mut hint = self.first_vacant_word;
+		let index = bit_indexing::push_front_from(self.index_header_mut(), capacity, &mut hint);
+		self.first_vacant_word = hint;
 		
 		unsafe {self.values().add(index).write(value)};
 		
@@ -120,6 +126,7 @@ impl<Type> Repository<Type>
 		
 		if index < capacity && bit_indexing::erase(self.index_header_mut(), index, capacity)
 		{
+			self.first_vacant_word = self.first_vacant_word.min(index / bit_indexing::IndexType::BITS as usize);
 			unsafe {result = Some(self.values().add(index).read())};
 			
 			self.len -= 1;
@@ -136,6 +143,7 @@ impl<Type> Repository<Type>
 	{
 		let capacity = self.capacity();
 		bit_indexing::erase(self.index_header_mut(), index, capacity);
+		self.first_vacant_word = self.first_vacant_word.min(index / bit_indexing::IndexType::BITS as usize);
 		self.len -= 1;
 		return self.values().add(index).read();
 	}
@@ -151,6 +159,7 @@ impl<Type> Repository<Type>
 			}
 			
 			self.len = 0;
+			self.first_vacant_word = 0;
 			self.index_header_mut().fill(0);
 		}
 	}
@@ -676,6 +685,46 @@ fn test_remove()
 		len -= 1;
 		assert_eq!(len, r.len());
 	}
+}
+
+#[test]
+fn test_insert_lowest_vacant()
+{
+	// Every insertion takes the lowest vacant index, with three levels of the index
+	use rand::{RngExt, SeedableRng};
+	let mut rng = rand::rngs::SmallRng::seed_from_u64(0);
+	let mut r = Repository::new();
+	let mut end = 0;
+	let mut vacant = std::collections::BTreeSet::new();
+	
+	let insert = |r: &mut Repository<u8>, end: &mut usize, vacant: &mut std::collections::BTreeSet<usize>|
+	{
+		let expected = vacant.pop_first().unwrap_or_else(|| {*end += 1; *end - 1});
+		assert_eq!(expected, r.insert(0));
+	};
+	
+	for _ in 0 .. 20_000
+	{
+		insert(&mut r, &mut end, &mut vacant);
+	}
+	
+	for _ in 0 .. 40_000
+	{
+		if rng.random_bool(0.5)
+		{
+			insert(&mut r, &mut end, &mut vacant);
+		}
+		else
+		{
+			let index = rng.random_range(0 .. end);
+			assert_eq!(! vacant.contains(&index), r.remove(index).is_some());
+			vacant.insert(index);
+		}
+	}
+	
+	assert_eq!(end - vacant.len(), r.len());
+	r.clear();
+	assert_eq!(0, r.insert(0));
 }
 
 #[test]

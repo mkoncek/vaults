@@ -413,6 +413,24 @@ pub fn push_front(index_span: &mut [IndexType], size: usize) -> usize
 	return position * IndexType::BITS as usize + mark_lowest(index_span, size, depth, offset, position);
 }
 
+/// Like [`push_front`], but looks at the word `hint` of the level of the values first, before which all words must be full,
+/// and moves `hint` to the word of the marked index if that word was full.
+#[inline]
+pub fn push_front_from(index_span: &mut [IndexType], size: usize, hint: &mut usize) -> usize
+{
+	let offset = index_span.len() - level_length_at(size, 0);
+	
+	// The lowest clear bit of the word is the lowest one of all, since the words before it are full
+	if index_span[offset + *hint] != IndexType::MAX
+	{
+		return *hint * IndexType::BITS as usize + mark_lowest(index_span, size, depth(size), offset, *hint);
+	}
+	
+	let result = push_front(index_span, size);
+	*hint = result / IndexType::BITS as usize;
+	return result;
+}
+
 /// Marks the lowest clear bit of the word at `position` in the level of the values, which starts at `offset`,
 /// and the bits of the words in the levels above which become full, returns the position of the marked bit.
 /// The words before the marked ones in each level must be full.
