@@ -1,10 +1,10 @@
 //! Hierarchical bitset index used by [`Repository`](super::Repository) to track occupied slots.
 //!
-//! The index is a tree of 128-bit words.  Each bit in a non-leaf word summarizes whether the
+//! The index is a tree of 64-bit words.  Each bit in a non-leaf word summarizes whether the
 //! corresponding child word is fully occupied.  This lets `push_front` (find-first-free) and
-//! `erase` run in *O*(depth) steps, where the depth is at most `ceil(log_{128}(capacity))`.
+//! `erase` run in *O*(depth) steps, where the depth is at most `ceil(log_{64}(capacity))`.
 
-pub type IndexType = u128;
+pub type IndexType = u64;
 
 #[inline]
 pub(super) const fn indices(index: usize) -> (usize, IndexType)
@@ -43,7 +43,7 @@ impl Iterator for IndexIterator
 		}
 		
 		let result: Self::Item = self.bitset.trailing_zeros() as usize;
-		// Clears the lowest set bit, which is cheaper than shifting a 128 bit mask
+		// Clears the lowest set bit without shifting a mask
 		self.bitset &= self.bitset - 1;
 		
 		return Some(result);
@@ -411,7 +411,7 @@ fn mark_lowest(index_span: &mut [IndexType], size: usize, depth: u32, mut offset
 {
 	let word = &mut index_span[offset + position];
 	let result = word.trailing_ones() as usize;
-	// Sets the lowest clear bit, which is cheaper than shifting a 128 bit mask
+	// Sets the lowest clear bit without shifting a mask
 	*word |= *word + 1;
 	
 	// Mark the full words in the levels above

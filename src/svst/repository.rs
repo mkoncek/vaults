@@ -10,9 +10,9 @@ use crate::svst::bit_indexing;
 /// that index is explicitly removed -- insertions and removals of *other* values never
 /// invalidate it.
 ///
-/// Occupancy is tracked by a tree of 128-bit bitsets stored in the same allocation as
-/// the values.  `insert` and `remove` are amortized *O*(log_{128} *n*), which is
-/// at most 3 levels for 2 million elements and at most 9 levels for any `usize` range.
+/// Occupancy is tracked by a tree of 64-bit bitsets stored in the same allocation as
+/// the values.  `insert` and `remove` are amortized *O*(log_{64} *n*), which is
+/// at most 4 levels for 16 million elements and at most 11 levels for any `usize` range.
 #[derive(Debug)]
 pub struct Repository<Type>
 {
@@ -98,7 +98,7 @@ impl<Type> Repository<Type>
 	/// Inserts a value in the repository returning its index within the repository.
 	/// The inserted value will remain at the position of the returned index for the whole lifetime of the repository or until the value is explicitly removed.
 	/// # Time complexity
-	/// Amortized _O(log<sub>128</sub> n)_ where _n_ is the number of values in the repository.
+	/// Amortized _O(log<sub>64</sub> n)_ where _n_ is the number of values in the repository.
 	#[inline]
 	pub fn insert(&mut self, value: Type) -> usize
 	{
@@ -117,7 +117,7 @@ impl<Type> Repository<Type>
 	
 	/// Removes a value at _index_ from the repository, returning it or [None].
 	/// # Time complexity
-	/// _O(log<sub>128</sub> n)_ where _n_ is the number of values in the repository.
+	/// _O(log<sub>64</sub> n)_ where _n_ is the number of values in the repository.
 	#[inline]
 	pub fn remove(&mut self, index: usize) -> Option<Type>
 	{
@@ -137,7 +137,7 @@ impl<Type> Repository<Type>
 	
 	/// Removes a value at _index_ from the repository, returning it.
 	/// # Time complexity
-	/// _O(log<sub>128</sub> n)_ where _n_ is the number of values in the repository.
+	/// _O(log<sub>64</sub> n)_ where _n_ is the number of values in the repository.
 	#[inline]
 	pub unsafe fn remove_unchecked(&mut self, index: usize) -> Type
 	{
@@ -499,7 +499,7 @@ impl Occupied
 		}
 		
 		let bit = self.bits.trailing_zeros() as usize;
-		// Clears the lowest set bit, which is cheaper than shifting a 128 bit mask
+		// Clears the lowest set bit without shifting a mask
 		self.bits &= self.bits - 1;
 		self.remaining -= 1;
 		return Some(self.word * bit_indexing::IndexType::BITS as usize + bit);
