@@ -541,12 +541,12 @@ where
 	
 	pub unsafe fn impl_get_at_unchecked(&self, position: usize) -> &Type
 	{
-		self.storage.nodes().get_unchecked(position).as_ref()
+		unsafe {self.storage.nodes().get_unchecked(position).as_ref()}
 	}
 	
 	pub unsafe fn impl_get_at_unchecked_mut(&mut self, position: usize) -> &mut Type
 	{
-		self.storage.nodes_mut().get_unchecked_mut(position).as_mut()
+		unsafe {self.storage.nodes_mut().get_unchecked_mut(position).as_mut()}
 	}
 	
 	pub fn impl_at(&self, position: usize) -> &Type

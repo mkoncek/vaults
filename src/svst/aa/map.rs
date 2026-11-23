@@ -133,23 +133,23 @@ where
 	
 	pub unsafe fn get_at_unchecked(&self, position: usize) -> &MappedType
 	{
-		&self.impl_get_at_unchecked(position).1
+		unsafe {&self.impl_get_at_unchecked(position).1}
 	}
 	
 	pub unsafe fn get_at_unchecked_mut(&mut self, position: usize) -> &mut MappedType
 	{
-		&mut self.impl_get_at_unchecked_mut(position).1
+		unsafe {&mut self.impl_get_at_unchecked_mut(position).1}
 	}
 	
 	pub unsafe fn get_key_value_at_unchecked(&self, position: usize) -> (&KeyType, &MappedType)
 	{
-		let result = self.impl_get_at_unchecked(position);
+		let result = unsafe {self.impl_get_at_unchecked(position)};
 		return (&result.0, &result.1);
 	}
 	
 	pub unsafe fn get_key_value_at_unchecked_mut(&mut self, position: usize) -> (&KeyType, &mut MappedType)
 	{
-		let result = self.impl_get_at_unchecked_mut(position);
+		let result = unsafe {self.impl_get_at_unchecked_mut(position)};
 		return (&result.0, &mut result.1);
 	}
 }

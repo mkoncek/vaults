@@ -105,7 +105,7 @@ impl<Type> Repository<Type>
 	#[inline]
 	pub unsafe fn as_slice(&self) -> &[Type]
 	{
-		std::slice::from_raw_parts(self.values(), self.capacity())
+		unsafe {std::slice::from_raw_parts(self.values(), self.capacity())}
 	}
 	
 	/// Returns a mutable slice containing the values of the repository.
@@ -113,7 +113,7 @@ impl<Type> Repository<Type>
 	#[inline]
 	pub unsafe fn as_mut_slice(&mut self) -> &mut [Type]
 	{
-		std::slice::from_raw_parts_mut(self.values(), self.capacity())
+		unsafe {std::slice::from_raw_parts_mut(self.values(), self.capacity())}
 	}
 	
 	/// Inserts a value in the repository returning its index within the repository.
@@ -208,14 +208,14 @@ impl<Type> Repository<Type>
 		{
 			let (word, mask) = bit_indexing::indices(index);
 			self.index_header_mut()[word] &= ! mask;
-			let result = self.values().add(index).read();
-			self.push_vacant(index);
+			let result = unsafe {self.values().add(index).read()};
+			unsafe {self.push_vacant(index)};
 			return result;
 		}
 		
 		bit_indexing::erase(self.index_header_mut(), index, capacity);
 		self.vacancy = self.vacancy.min(index / bit_indexing::IndexType::BITS as usize);
-		return self.values().add(index).read();
+		return unsafe {self.values().add(index).read()};
 	}
 	
 	/// Clears the repository, removing all values.
@@ -253,12 +253,12 @@ impl<Type> Repository<Type>
 	
 	pub unsafe fn get_unchecked(&self, index: usize) -> &Type
 	{
-		self.as_slice().get_unchecked(index)
+		unsafe {self.as_slice().get_unchecked(index)}
 	}
 	
 	pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut Type
 	{
-		self.as_mut_slice().get_unchecked_mut(index)
+		unsafe {self.as_mut_slice().get_unchecked_mut(index)}
 	}
 	
 	#[inline]
@@ -321,7 +321,7 @@ impl<Type> Repository<Type>
 	{
 		if self.capacity() != 0
 		{
-			std::alloc::dealloc(self.storage.data.as_ptr(), Self::layout_for(self.capacity()).0);
+			unsafe {std::alloc::dealloc(self.storage.data.as_ptr(), Self::layout_for(self.capacity()).0)};
 		}
 		
 		// Not by assigning a new repository, which would drop this one
@@ -355,11 +355,16 @@ impl<Type> Repository<Type>
 	{
 		debug_assert!(Self::LINKED && index < self.vacancy);
 		let region = index >> Self::regions(self.capacity()).0;
-		let head = self.heads().add(region);
-		let next = if self.vacant_regions & (1 << region) != 0 {*head} else {Self::NIL};
-		// The slot is vacant, so its memory holds the link
-		self.values().add(index).cast::<usize>().write_unaligned(next);
-		*head = index;
+		let head = unsafe {self.heads().add(region)};
+		let next = if self.vacant_regions & (1 << region) != 0 {unsafe {*head}} else {Self::NIL};
+		
+		unsafe
+		{
+			// The slot is vacant, so its memory holds the link
+			self.values().add(index).cast::<usize>().write_unaligned(next);
+			*head = index;
+		}
+		
 		self.vacant_regions |= 1 << region;
 	}
 	
@@ -368,10 +373,10 @@ impl<Type> Repository<Type>
 	unsafe fn pop_vacant(&mut self) -> usize
 	{
 		let region = self.vacant_regions.trailing_zeros() as usize;
-		let head = self.heads().add(region);
-		let index = *head;
-		let next = self.values().add(index).cast::<usize>().read_unaligned();
-		*head = next;
+		let head = unsafe {self.heads().add(region)};
+		let index = unsafe {*head};
+		let next = unsafe {self.values().add(index).cast::<usize>().read_unaligned()};
+		unsafe {*head = next};
 		
 		if next == Self::NIL
 		{
@@ -402,7 +407,7 @@ impl<Type> Repository<Type>
 			while vacant != 0
 			{
 				let bit = BITS - 1 - vacant.leading_zeros() as usize;
-				self.push_vacant(word * BITS + bit);
+				unsafe {self.push_vacant(word * BITS + bit)};
 				vacant &= ! (1 << bit);
 			}
 		}

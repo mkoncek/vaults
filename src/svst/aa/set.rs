@@ -116,7 +116,7 @@ where
 	
 	pub unsafe fn get_at_unchecked(&self, position: usize) -> &KeyType
 	{
-		&self.impl_get_at_unchecked(position).0
+		unsafe {&self.impl_get_at_unchecked(position).0}
 	}
 }
 
